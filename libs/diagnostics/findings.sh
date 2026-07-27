@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# the-whole-shebang/diagnostics - Severity-tagged findings and a verdict
+# the-whole-shebang/diagnostics/findings - Findings, and a verdict
 # =============================================================================
 # Part of the-whole-shebang. Built on nutshell, sourced on its own.
 # https://github.com/orgrinrt/the-whole-shebang
@@ -45,8 +45,8 @@
 #   3  findings needing judgement, none of them blocking
 # =============================================================================
 
-[[ -n "${_SHEBANG_DIAGNOSTICS_SH:-}" ]] && return 0
-readonly _SHEBANG_DIAGNOSTICS_SH=1
+[[ -n "${_SHEBANG_DIAGNOSTICS_FINDINGS_SH:-}" ]] && return 0
+readonly _SHEBANG_DIAGNOSTICS_FINDINGS_SH=1
 
 # nutshell has to be initialised first. Erroring here beats failing later on an
 # undefined `log_tagged`, where the message names a symbol rather than the

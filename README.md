@@ -17,7 +17,7 @@ Initialise nutshell, then source the library:
 ```bash
 #!/usr/bin/env bash
 . "${0%/*}/lib/nutshell/init"
-. "${0%/*}/lib/shebang/diagnostics/diagnostics.sh"
+. "${0%/*}/lib/shebang/diagnostics/findings.sh"
 
 finding_block "version moved on a feature branch"
 finding_note  "A version moves on a release. If this PR is one, say so."
@@ -31,7 +31,7 @@ than failing later on an undefined function.
 
 | Library | What it is for |
 |---|---|
-| `diagnostics` | Recording severity-tagged findings and rendering a verdict, with an exit code a caller can branch on. |
+| `diagnostics/findings` | Recording severity-tagged findings and rendering a verdict, with an exit code a caller can branch on. |
 
 ## License
 
