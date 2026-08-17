@@ -1,6 +1,6 @@
 # the-whole-shebang
 
-> The whole shebang. Complete bash library for serious scripting.
+> A collection of bash libraries built on nutshell, each sourceable on its own.
 
 A collection of libraries built on [nutshell](https://github.com/orgrinrt/nutshell), each one
 sourceable on its own.
@@ -29,9 +29,10 @@ than failing later on an undefined function.
 
 ## The libraries
 
-| Library | What it is for |
-|---|---|
-| `diagnostics` | Recording severity-tagged findings and rendering a verdict, with an exit code a caller can branch on. |
+One library so far. `diagnostics` records severity-tagged findings, through
+`finding_block` and `finding_judge` with `finding_note` for continuation lines,
+and renders a verdict whose exit code a caller can branch on: 0 when nothing was
+found, 1 when something blocking was, and 3 when something needs judgement.
 
 ## License
 
