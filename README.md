@@ -12,17 +12,28 @@ else, and never learns that the rest exists.
 
 ## Using one
 
-Initialise nutshell, then source the library:
+Declare the dependency in `nut.toml` and let nutshell resolve it:
+
+```toml
+[deps.shebang]
+git = "https://github.com/orgrinrt/the-whole-shebang.git"
+ref = "main"
+```
 
 ```bash
 #!/usr/bin/env bash
 . "${0%/*}/lib/nutshell/init"
-. "${0%/*}/lib/shebang/diagnostics/diagnostics.sh"
+
+use shebang::diagnostics/diagnostics
 
 finding_block "version moved on a feature branch"
 finding_note  "A version moves on a release. If this PR is one, say so."
 findings_verdict
 ```
+
+Vendoring the repository and sourcing a file directly also works. The libraries
+live under `libs/`, so a checkout at `lib/shebang/` is sourced as
+`. "${0%/*}/lib/shebang/libs/diagnostics/diagnostics.sh"`.
 
 Every library errors immediately if nutshell has not been initialised, naming the setup step rather
 than failing later on an undefined function.
