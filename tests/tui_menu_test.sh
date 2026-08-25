@@ -193,3 +193,103 @@ it_shows_the_cursor_row_at_every_height_from_one_upward() {
 it_is_safe_to_source_twice() {
     assert_ok . "${BASH_SOURCE[0]%/*}/../libs/tui/menu.sh"
 }
+
+# --- filtering ---------------------------------------------------------------
+
+#[test]
+it_shows_everything_when_the_filter_is_empty() {
+    fixture; TUI_MENU_FILTER=""; tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "7"
+}
+
+#[test]
+it_narrows_to_matching_entries() {
+    fixture
+    TUI_MENU_TEXT=(Disk Alpha Beta Gamma Boot Delta Epsilon)
+    TUI_MENU_FILTER="delta"; tui_menu_refilter
+    # Delta, plus the Boot heading it sits under.
+    assert_eq "${#TUI_MENU_VIEW[@]}" "2"
+}
+
+#[test]
+it_matches_without_regard_to_case() {
+    fixture
+    TUI_MENU_TEXT=(Disk Alpha Beta Gamma Boot Delta Epsilon)
+    TUI_MENU_FILTER="DELTA"; tui_menu_refilter
+    local n1="${#TUI_MENU_VIEW[@]}"
+    TUI_MENU_FILTER="delta"; tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "$n1"
+}
+
+#[test]
+it_searches_the_note_as_well_as_the_text() {
+    # The note carries why a row is unavailable. Searching "not installed" to
+    # find everything blocked on a missing package is the question people have.
+    tui_menu_reset
+    tui_menu_heading "Disk"
+    tui_menu_entry a "Alpha" off "needs cryptsetup, which is not installed"
+    tui_menu_entry b "Beta"  ok  "ready"
+    TUI_MENU_FILTER="not installed"; tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "2"
+}
+
+#[test]
+it_drops_a_heading_whose_entries_all_vanish() {
+    # Otherwise filtering leaves a screen of section titles with nothing under
+    # them, which reads as a broken list rather than a narrowed one.
+    fixture
+    TUI_MENU_TEXT=(Disk Alpha Beta Gamma Boot Delta Epsilon)
+    TUI_MENU_FILTER="alpha"; tui_menu_refilter
+    local i seen_boot=0
+    for i in "${TUI_MENU_VIEW[@]}"; do [[ "$i" == "4" ]] && seen_boot=1; done
+    assert_eq "$seen_boot" "0"
+}
+
+#[test]
+it_keeps_a_heading_whose_entries_survive() {
+    # The control for the heading rule: dropping every heading would satisfy
+    # the test above.
+    fixture
+    TUI_MENU_TEXT=(Disk Alpha Beta Gamma Boot Delta Epsilon)
+    TUI_MENU_FILTER="alpha"; tui_menu_refilter
+    assert_eq "${TUI_MENU_VIEW[0]}" "0"
+}
+
+#[test]
+it_can_match_nothing_at_all() {
+    fixture
+    TUI_MENU_FILTER="zzzz-no-such-thing"; tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "0"
+}
+
+#[test]
+it_keeps_the_cursor_on_a_real_row_after_filtering() {
+    # The view is renumbered by a filter, so a cursor held over from before it
+    # would point at a different row, or past the end.
+    fixture
+    TUI_MENU_TEXT=(Disk Alpha Beta Gamma Boot Delta Epsilon)
+    TUI_MENU_FILTER="epsilon"; tui_menu_refilter
+    local c; c="$(_tui_menu_first)"
+    assert_ok _tui_menu_landable "$c"
+    (( c < ${#TUI_MENU_VIEW[@]} )) && assert_ok true || assert_ok false
+}
+
+#[test]
+it_scrolls_against_the_filtered_length_not_the_full_one() {
+    # A window clamped to the unfiltered count would scroll past the end of a
+    # narrowed list and show blank rows.
+    fixture
+    TUI_MENU_TEXT=(Disk Alpha Beta Gamma Boot Delta Epsilon)
+    TUI_MENU_FILTER="alpha"; tui_menu_refilter
+    assert_eq "$(_tui_menu_window 0 4 0)" "0"
+    assert_eq "$(_tui_menu_len)" "2"
+}
+
+#[test]
+it_resets_the_filter_with_the_menu() {
+    fixture
+    TUI_MENU_FILTER="something"; tui_menu_refilter
+    tui_menu_reset
+    assert_empty "$TUI_MENU_FILTER"
+    assert_eq "${#TUI_MENU_VIEW[@]}" "0"
+}
