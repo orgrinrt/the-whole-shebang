@@ -79,6 +79,13 @@ tui_probe() {
 }
 
 #[pub]
+# Is there a terminal to interact with. The question every caller that wants to
+# ask the user something has to answer first, named here so each one does not
+# reimplement it against the flag and drift.
+# Usage: tui_is_tty -> returns 0 when there is a terminal
+tui_is_tty() { [[ $TUI_TTY -eq 1 ]]; }
+
+#[pub]
 # Re-read the terminal dimensions. Armed on WINCH by `tui_begin`, so a caller
 # that redraws on every key never has to ask.
 # Usage: tui_size -> sets TUI_ROWS and TUI_COLS

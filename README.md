@@ -35,6 +35,7 @@ than failing later on an undefined function.
 | `tui/term` | Entering and leaving a full-screen terminal session, and putting the terminal back however the run ends. |
 | `tui/key` | Reading a keypress and naming it, so nothing above ever matches on an escape sequence. |
 | `tui/menu` | A list you choose from, with headings the cursor skips and a viewport that keeps the cursor in view. |
+| `tui/confirm` | Asking before something irreversible, in three strengths, refusing by default when it cannot ask. |
 
 ## Tests
 

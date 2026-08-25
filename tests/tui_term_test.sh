@@ -43,6 +43,16 @@ it_honours_no_color_even_with_a_terminal() {
 }
 
 #[test]
+it_answers_whether_there_is_a_terminal() {
+    # Callers branch on this before asking the user anything. When it was
+    # missing entirely, every "refuses without a terminal" test still passed,
+    # because a command-not-found also returns non-zero. Green for the wrong
+    # reason is the failure mode this pins.
+    TUI_TTY=1; assert_ok    tui_is_tty
+    TUI_TTY=0; assert_fails tui_is_tty
+}
+
+#[test]
 it_falls_back_to_a_usable_size_with_no_terminal() {
     TUI_TTY=0
     LINES="" COLUMNS="" tui_size
