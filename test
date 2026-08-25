@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# =============================================================================
+# the-whole-shebang/test - Run the test suite
+# =============================================================================
+# Every `#[test]` function under tests/. An entry point, so it bootstraps
+# nutshell from the submodule rather than relying on an installed interpreter.
+#
+# Usage:
+#   ./test                          everything
+#   ./test tests/tui_term_test.sh   one file
+#   TEST_FILTER=restore ./test      only tests whose name contains "restore"
+# =============================================================================
+
+set -uo pipefail
+HERE="${BASH_SOURCE[0]%/*}"
+
+if [[ ! -f "$HERE/lib/nutshell/init" ]]; then
+    printf 'nutshell is missing. Run: git submodule update --init\n' >&2
+    exit 1
+fi
+. "$HERE/lib/nutshell/init"
+
+use test log
+
+if [[ $# -gt 0 ]]; then
+    # A named file that is not there is an error rather than an empty run. A
+    # green suite that ran nothing is the one result a test command must never
+    # give, and a mistyped path is the usual way to get one.
+    for f in "$@"; do
+        if [[ ! -f "$f" ]]; then
+            log_error "no such test file: ${f}"
+            exit 2
+        fi
+    done
+    for f in "$@"; do
+        log_step "${f##*/}"
+        test_run "$f"
+    done
+else
+    test_run_dir "$HERE/tests"
+fi
+
+test_summary
