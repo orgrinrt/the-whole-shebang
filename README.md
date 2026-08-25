@@ -36,6 +36,7 @@ than failing later on an undefined function.
 | `tui/key` | Reading a keypress and naming it, so nothing above ever matches on an escape sequence. |
 | `tui/menu` | A list you choose from, with headings the cursor skips and a viewport that keeps the cursor in view. |
 | `tui/confirm` | Asking before something irreversible, in three strengths, refusing by default when it cannot ask. |
+| `tui/run` | Running something that owns the screen, and stating the result rather than leaving it implicit. |
 
 ## Tests
 
