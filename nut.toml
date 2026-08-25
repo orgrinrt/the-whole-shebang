@@ -1,0 +1,66 @@
+# =============================================================================
+# the-whole-shebang - QA configuration
+# =============================================================================
+# Part of the-whole-shebang. https://github.com/orgrinrt/the-whole-shebang
+#
+# The same tough conventions nutshell holds itself to. A collection of
+# libraries other projects import by git uri has no room for a laxer bar than
+# the thing it is built on.
+# =============================================================================
+
+[meta]
+version = "0.1.0"
+name = "the-whole-shebang"
+description = "Standalone bash libraries built on nutshell, each taken on its own."
+
+[paths]
+lib_dir = "libs"
+exclude = [".git", "lib/nutshell", "node_modules", "vendor", "target", "dist", "build"]
+include = ["*.sh", "test"]
+
+[annotations]
+public_api = "#[pub]"
+allow_trivial_wrapper_ergonomics = "#[allow(trivial_wrapper)]"
+allow_large_file = "#\\[allow\\(loc = ([0-9]+)\\)\\]"
+
+[tests.syntax]
+shell = "bash"
+fail_on_error = true
+
+[tests.trivial_wrappers]
+max_lines = 2
+local_usage_threshold = 4
+global_usage_threshold = 6
+min_vars_for_ergonomic = 2
+token_complexity_warn = 3
+token_complexity_pass = 4
+warn_threshold = 5
+fail_threshold = 20
+exempt_annotations = ["#[pub]", "#[allow(trivial_wrapper)]"]
+
+[tests.file_size]
+max_loc = 300
+max_total_lines = 500
+exempt_annotation_pattern = "#\\[allow\\(loc = ([0-9]+)\\)\\]"
+exempt_patterns = []
+
+[tests.function_duplication]
+similarity_threshold = 0.85
+min_lines_to_check = 3
+exclude_patterns = []
+
+[tests.cruft]
+fail_on_debug = true
+fail_on_todo = false
+max_todos = 10
+
+[tests.public_api_docs]
+public_api_annotation = "#[pub]"
+required_elements = ["Usage:"]
+min_doc_lines = 1
+
+[output]
+color = "auto"
+verbosity = "normal"
+show_passing = false
+show_summary = true

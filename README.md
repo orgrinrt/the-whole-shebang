@@ -32,6 +32,15 @@ than failing later on an undefined function.
 | Library | What it is for |
 |---|---|
 | `diagnostics/findings` | Recording severity-tagged findings and rendering a verdict, with an exit code a caller can branch on. |
+| `tui/term` | Entering and leaving a full-screen terminal session, and putting the terminal back however the run ends. |
+
+## Tests
+
+```bash
+git submodule update --init      # nutshell, for the harness
+./test                           # everything
+./test tests/tui_term_test.sh    # one file
+```
 
 ## License
 
