@@ -179,18 +179,41 @@ it_leaves_the_motion_in_a_variable() {
 }
 
 #[test]
-it_maps_the_same_keys_both_ways() {
-    # Two spellings of one answer is two answers waiting to disagree. Every key
-    # the printing form knows about, not a sample of them.
-    local k
-    for k in up down left right k j h l tab shift-tab enter q '/' '?' '[' ']' \
-             home end pgup pgdn ctrl-up ctrl-down alt-x esc backspace \
-             $'\020' $'\016' $'\002' $'\006' ''; do
-        TUI_KEY="$k"
-        TUI_MOTION=""
+it_maps_every_key_to_the_motion_it_should() {
+    # A literal table, not the other form of the same function.
+    #
+    # This used to call `tui_key_motion_now` and assert `$TUI_MOTION` equalled
+    # `$(tui_key_motion)`. `tui_key_motion` is `tui_key_motion_now; printf
+    # '%s' "$TUI_MOTION"`, so that compared a variable against itself: with the
+    # whole `case` replaced by `TUI_MOTION=XXXX` it still passed while seven
+    # sibling tests failed. Twenty-nine keys of it, which reads as thorough and
+    # constrained nothing.
+    local pair k want
+    for pair in \
+        'up:up' 'k:up' 'shift-tab:up' $'\020:up' \
+        'down:down' 'j:down' 'tab:down' $'\016:down' \
+        'left:left' 'h:left' $'\002:left' \
+        'right:right' 'l:right' $'\006:right' \
+        'enter:enter' 'q:q' '/:/' '?:?' '[:[' ']:]' \
+        'home:home' 'end:end' 'pgup:pgup' 'pgdn:pgdn' \
+        'ctrl-up:ctrl-up' 'ctrl-down:ctrl-down' 'alt-x:alt-x' \
+        'esc:esc' 'backspace:backspace' ':'
+    do
+        k="${pair%:*}"; want="${pair#*:}"
+        TUI_KEY="$k"; TUI_MOTION=""
         tui_key_motion_now
-        assert_eq "$TUI_MOTION" "$(tui_key_motion)"
+        assert_eq "$TUI_MOTION" "$want"
     done
+}
+
+#[test]
+it_gives_the_same_answer_printed_as_it_leaves_in_the_variable() {
+    # Worth one case rather than twenty-nine: the printing form is built on the
+    # other, so this says they are still wired together and nothing more.
+    TUI_KEY="k"; TUI_MOTION=""
+    tui_key_motion_now
+    assert_eq "$(tui_key_motion)" "$TUI_MOTION"
+    assert_eq "$TUI_MOTION" "up"
 }
 
 #[test]
