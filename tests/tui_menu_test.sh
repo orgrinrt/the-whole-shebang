@@ -1064,3 +1064,87 @@ it_draws_a_heading_across_the_row_rather_than_in_a_column() {
     local line; line="$(grep -m1 'disk$\|disk ' <<<"$out")"
     assert_contains "$out" "disk"
 }
+
+#[test]
+it_keeps_the_groups_in_the_same_order_whatever_the_sort() {
+    # Sorting orders rows inside a group. Sections that rearrange when the
+    # ordering changes lose the reader's place entirely, and with a state sort
+    # the section order would depend on which group happened to hold the
+    # readiest row, so adding one task would rearrange the screen.
+    local headings_declared headings_name headings_state
+    _menu_kinds; TUI_MENU_GROUP=kind; TUI_MENU_SORT=declared; tui_menu_refilter
+    headings_declared="$(_menu_headings)"
+    _menu_kinds; TUI_MENU_GROUP=kind; TUI_MENU_SORT=name; tui_menu_refilter
+    headings_name="$(_menu_headings)"
+    _menu_kinds; TUI_MENU_GROUP=kind; TUI_MENU_SORT=state; tui_menu_refilter
+    headings_state="$(_menu_headings)"
+    assert_eq "$headings_name"  "$headings_declared"
+    assert_eq "$headings_state" "$headings_declared"
+}
+
+#[test]
+it_still_reorders_the_rows_inside_a_group() {
+    # The control for the test above. Holding the groups still must not stop
+    # the sort doing anything at all.
+    _menu_kinds; TUI_MENU_GROUP=kind; TUI_MENU_SORT=declared; tui_menu_refilter
+    local a; a="$(_menu_shape)"
+    _menu_kinds; TUI_MENU_GROUP=kind; TUI_MENU_SORT=name; tui_menu_refilter
+    local b; b="$(_menu_shape)"
+    assert_ne "$a" "$b"
+}
+
+#[test]
+it_keeps_the_sections_in_the_order_they_were_declared() {
+    _menu_kinds; TUI_MENU_GROUP=section; TUI_MENU_SORT=name; tui_menu_refilter
+    assert_eq "$(_menu_headings)" "disk|net|"
+}
+
+# The headings the reader sees, in order, as one line.
+_menu_headings() {
+    local i out=""
+    for i in "${!TUI_MENU_VIEW[@]}"; do
+        tui_menu_raw "$i" >/dev/null 2>&1 && continue
+        out="${out}$(tui_menu_heading_at "$i")|"
+    done
+    printf '%s' "$out"
+}
+
+#[test]
+it_does_not_draw_the_last_row_as_a_heading_with_no_label() {
+    # `${ARRAY[-1]}` in bash is the last element rather than an error, so an
+    # invented heading with an empty label would silently draw the text of
+    # whichever row happened to be last.
+    _menu_kinds
+    TUI_MENU_VIEW=(-1); TUI_MENU_VHEAD=("")
+    local out; out="$(_tui_menu_cells -1 0 ""; printf '%s' "${_TUI_MENU_CELLS[1]}")"
+    assert_fails grep -q 'apple erase' <<<"$out"
+    assert_fails grep -q 'Beta fix' <<<"$out"
+}
+
+#[test]
+it_still_draws_a_heading_that_has_a_label() {
+    # The control.
+    _menu_kinds
+    _tui_menu_cells -1 0 "somewhere"
+    assert_contains "${_TUI_MENU_CELLS[1]}" "somewhere"
+}
+
+#[test]
+it_says_in_the_readme_as_many_modules_as_it_declares() {
+    # Said wrong twice: eight when there were twelve, then twelve when there
+    # were fourteen. A number in prose has nothing keeping it true, so this is
+    # the thing that keeps it.
+    local root="${BASH_SOURCE[0]%/*}/.."
+    local declared spelled
+    # Only the public ones. The two halves of the menu are marked internal in
+    # `lib.nut`, the way nutshell marks its own impl modules.
+    declared="$(grep '^tui::' "$root/lib.nut" | grep -vc 'internal')"
+    spelled="$(grep -oE '^(Eight|Nine|Ten|Eleven|Twelve|Thirteen|Fourteen|Fifteen|Sixteen) modules' "$root/README.md" | head -1 | cut -d' ' -f1)"
+    local n
+    case "$spelled" in
+        Eight) n=8 ;; Nine) n=9 ;; Ten) n=10 ;; Eleven) n=11 ;; Twelve) n=12 ;;
+        Thirteen) n=13 ;; Fourteen) n=14 ;; Fifteen) n=15 ;; Sixteen) n=16 ;;
+        *) n=0 ;;
+    esac
+    assert_eq "$n" "$declared"
+}

@@ -69,8 +69,30 @@ tui_menu_refilter() {
         rows+=("$i")
     done
 
+    # The order the groups come in is taken before the sort, not after. A sort
+    # orders rows inside a group and must not move the groups: sections that
+    # rearrange when the ordering changes lose the reader's place entirely, and
+    # with a state sort the section order would depend on which group happened
+    # to hold the readiest row, so adding one task would rearrange the screen.
+    local -a order=()
+    _tui_menu_group_order rows order
+
     _tui_menu_sort_rows rows
-    _tui_menu_group_rows rows
+    _tui_menu_group_rows rows order
+}
+
+# The groups, in the order they first appear in the declared rows.
+_tui_menu_group_order() {
+    local -n _rows="$1"
+    local -n _out="$2"
+    _out=()
+    local row group g known
+    for row in ${_rows[@]+"${_rows[@]}"}; do
+        group="$(_tui_menu_group_of "$row")"
+        known=0
+        for g in ${_out[@]+"${_out[@]}"}; do [[ "$g" == "$group" ]] && { known=1; break; }; done
+        (( known == 0 )) && _out+=("$group")
+    done
 }
 
 # Order the rows within whatever group they end up in.
@@ -141,7 +163,8 @@ _tui_menu_group_of() {
 # not leave a screen of titles with nothing beneath them.
 _tui_menu_group_rows() {
     local -n _rows="$1"
-    local i row group last=$'\001'
+    local -n _seen="$2"
+    local row group
 
     if [[ "$TUI_MENU_GROUP" == "none" ]]; then
         for row in ${_rows[@]+"${_rows[@]}"}; do
@@ -150,18 +173,10 @@ _tui_menu_group_rows() {
         return 0
     fi
 
-    # Grouped, so the rows have to be gathered by group rather than emitted in
-    # sorted order: sorting inside a group is the point, and a sort across all
-    # of them would interleave the groups.
-    local -a seen=()
-    for row in ${_rows[@]+"${_rows[@]}"}; do
-        group="$(_tui_menu_group_of "$row")"
-        local known=0 g
-        for g in ${seen[@]+"${seen[@]}"}; do [[ "$g" == "$group" ]] && { known=1; break; }; done
-        (( known == 0 )) && seen+=("$group")
-    done
-
-    for group in ${seen[@]+"${seen[@]}"}; do
+    # Gathered by group rather than emitted in sorted order: sorting inside a
+    # group is the point, and emitting the sorted list straight out would
+    # interleave the groups.
+    for group in ${_seen[@]+"${_seen[@]}"}; do
         local any=0
         for row in ${_rows[@]+"${_rows[@]}"}; do
             [[ "$(_tui_menu_group_of "$row")" == "$group" ]] || continue

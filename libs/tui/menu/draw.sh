@@ -54,7 +54,11 @@ _tui_menu_cells() {
     # for what follows, not a thing with a state.
     if (( i < 0 )) || [[ "${TUI_MENU_STATE[$i]}" == "heading" ]]; then
         local label="$heading"
-        [[ -n "$label" ]] || label="${TUI_MENU_TEXT[$i]}"
+        # Only a declared heading has a row to read its label from. For an
+        # invented one `i` is -1, and `${ARRAY[-1]}` in bash is the last
+        # element rather than an error, so a heading whose label was somehow
+        # empty would silently draw the last row's text.
+        [[ -n "$label" || $i -lt 0 ]] || label="${TUI_MENU_TEXT[$i]}"
         _TUI_MENU_CELLS=("" "${TUI_C_HEAD}${label}${TUI_C_END}" "" "")
         return 0
     fi
