@@ -15,17 +15,24 @@
 # that was a tall column beside the list can be two or three short columns
 # below it, showing the same things.
 #
-# So a panel says what it needs and what shapes it can take, and the plan finds
-# an arrangement. Dropping one is the last resort, not the first move: it
-# happens only when no shape of it fits anywhere, and then the least important
-# goes first. The search is for the arrangement that drops the fewest, tried
-# with none dropped, then one, and so on.
+# So a panel says what it needs and what shapes it can take, and the plan fills
+# lines with them in priority order, wrapping to a new line when the next one
+# does not fit. A panel is dropped when no shape of it fits anywhere, and since
+# the pass runs in priority order the ones dropped are the ones that said they
+# mattered least.
 #
-# A shape is `WxH`, smallest first, and a panel may name several. `30x8` is a
-# sidebar; `60x3` is the same content as a strip underneath. The plan prefers
-# the largest shape that still lets everything else fit, rather than the
-# largest that fits on its own, because a panel that takes the room three
-# others needed has not earned it.
+# A shape is `WxH`, and a panel may name several. `30x8` is a sidebar; `60x3`
+# is the same content as a strip underneath. Each shape is scored by how many
+# of the panels after it still fit if it is taken, so a panel that would take
+# the room three others needed loses to a smaller shape of itself. That is one
+# step of lookahead, not a search: nothing is undone.
+#
+# It does not promise the arrangement that drops the fewest, and it cannot.
+# Finding that is bin packing. What it promises is that the same inputs give
+# the same arrangement, that a placed panel is always at a size it declared,
+# and that nothing overlaps or leaves the screen. Widening a terminal can still
+# reshuffle: `tools/plan-resize-report` measures how often, so a change to the
+# model can be compared against the one before it.
 #
 # Usage:
 #   use shebang::tui::term
@@ -82,9 +89,14 @@ tui_plan_reset() {
 }
 
 #[pub]
-# What the screen is for. It is never moved and never dropped; everything else
-# is placed around it. Its width and height are the least it can work in, and
-# it grows into whatever is left.
+# What the screen is for. It sits at the top left, is never moved and never
+# dropped, and everything else is placed around it. The size given is the size
+# it gets, clamped to the screen: it does not grow into space nobody claimed,
+# because the panels are placed against it and it cannot be both the thing they
+# are measured from and a thing that moves afterwards.
+#
+# `tui_plan_main_w` and `tui_plan_main_h` give the clamped values back, which
+# is what a caller needs to draw it.
 # Usage: tui_plan_main <min-cols> <min-rows>
 tui_plan_main() {
     local w="${1:-1}" h="${2:-1}"
@@ -94,9 +106,29 @@ tui_plan_main() {
 }
 
 #[pub]
+# How wide the main region ended up, clamped to the screen.
+# Usage: tui_plan_main_w -> a number
+tui_plan_main_w() {
+    local w="$TUI_PLAN_MAIN_W"
+    (( w < 1 )) && w=1
+    (( w > TUI_PLAN_COLS )) && w="$TUI_PLAN_COLS"
+    printf '%d' "$w"
+}
+
+#[pub]
+# How tall the main region ended up, clamped to the screen.
+# Usage: tui_plan_main_h -> a number
+tui_plan_main_h() {
+    local h="$TUI_PLAN_MAIN_H"
+    (( h < 1 )) && h=1
+    (( h > TUI_PLAN_ROWS )) && h="$TUI_PLAN_ROWS"
+    printf '%d' "$h"
+}
+
+#[pub]
 # A panel, its importance, and the shapes it can take. Higher priority is
-# dropped sooner; 0 is never dropped. Shapes are `WxH`, and the plan prefers
-# the largest that still lets everything else fit.
+# dropped sooner. Shapes are `WxH`, and each is weighed by how many of the
+# panels after it still fit if it is taken.
 # Usage: tui_plan_panel <name> <priority> <WxH> [WxH...]
 tui_plan_panel() {
     local name="$1" prio="${2:-1}"; shift 2 2>/dev/null || shift $#
@@ -111,57 +143,6 @@ tui_plan_panel() {
 
 _plan_shape_w() { printf '%s' "${1%%x*}"; }
 _plan_shape_h() { printf '%s' "${1##*x}"; }
-
-# The free rectangles, as "row col w h". Two of them: the strip to the right of
-# the main region, and the strip below it. That is the whole geometry, and it
-# is enough: a panel is either beside what you came for or under it.
-_plan_free() {
-    local main_w="$1" main_h="$2"
-    local right_w=$(( TUI_PLAN_COLS - main_w ))
-    local below_h=$(( TUI_PLAN_ROWS - main_h ))
-    (( right_w > 0 )) && printf '1 %d %d %d\n' $(( main_w + 1 )) "$right_w" "$main_h"
-    (( below_h > 0 )) && printf '%d 1 %d %d\n' $(( main_h + 1 )) "$TUI_PLAN_COLS" "$below_h"
-}
-
-# Place every kept panel, in priority order, into the free rectangles.
-#
-# It backtracks. Taking the biggest shape that fits and moving on is the
-# obvious way and it is wrong: a panel that takes the whole strip because it
-# could starves the one after it, and a smaller shape for the first would have
-# left room for both. So a shape that leads to a dead end is undone and the
-# next one down is tried.
-#
-# The search is bounded by the shapes a panel declares, which is a handful, and
-# by the panels on a screen, which is a handful. Six panels with three shapes
-# each is a few hundred arrangements; the shell can afford that once per
-# resize.
-_plan_attempt() {
-    local main_w="$1" main_h="$2"; shift 2
-    local -a keep=("$@")
-    local n="${#TUI_PLAN_NAME[@]}" i
-
-    _PLAN_FREE=()
-    while read -r r c w h; do
-        [[ -n "$r" ]] || continue
-        _PLAN_FREE+=("$r $c $w $h")
-    done < <(_plan_free "$main_w" "$main_h")
-
-    for (( i = 0; i < n; i++ )); do
-        TUI_PLAN_R[i]=0; TUI_PLAN_C[i]=0; TUI_PLAN_W[i]=0; TUI_PLAN_H[i]=0
-    done
-
-    # Priority order: 0 first, since those cannot be dropped and should get the
-    # good space, then ascending.
-    _PLAN_ORDER=()
-    while read -r i; do _PLAN_ORDER+=("$i"); done < <(
-        for (( i = 0; i < n; i++ )); do
-            (( keep[i] == 1 )) || continue
-            printf '%d %d\n' "${TUI_PLAN_PRIO[$i]}" "$i"
-        done | sort -n -k1,1 -k2,2 | awk '{print $2}'
-    )
-
-    _plan_place 0
-}
 
 # The shapes a panel can take, largest area first. Declared order is the
 # author's, not a preference: "the largest that fits" is about the space it
@@ -188,8 +169,20 @@ _plan_sort_shapes() {
         done
         areas[j+1]="$a"; shapes[j+1]="$sh"
     done
+    # Joined under a stated IFS. `"${a[*]}"` uses whatever the caller's IFS
+    # happens to be, and the split on the way back out used it too, so the two
+    # cancelled by luck and stopped cancelling the moment a caller set IFS.
+    local IFS=' '
     printf '%s' "${shapes[*]}"
 }
+
+# The shapes a panel declared, as an array, split on spaces and nothing else.
+_plan_shapes_of() {
+    local IFS=' '
+    # shellcheck disable=SC2206
+    _PLAN_SHAPES_OUT=(${TUI_PLAN_SHAPES[$1]})
+}
+declare -ga _PLAN_SHAPES_OUT=()
 
 # Lines, filled in order, wrapping when the next panel does not fit.
 #
@@ -217,37 +210,120 @@ _plan_sort_shapes() {
 # discarded. The placements are the point of calling it.
 declare -ga _PLAN_LEFT=()
 
+# Can this shape go, given where the line has got to? Answers into
+# _PLAN_FIT_{TOP,X,LINEH}, and returns non-zero when it cannot.
+#
+# Split out because the lookahead has to ask the same question about a state it
+# is only imagining, and two copies of wrap arithmetic is two chances to get
+# the boundary wrong.
+_plan_fit() {
+    local top="$1" left="$2" width="$3" height="$4"
+    local line_top="$5" line_h="$6" x="$7" sw="$8" sh="$9"
+
+    (( sw > width )) && return 1
+    if (( x + sw - left > width )); then
+        local next_top=$(( line_top + line_h ))
+        (( next_top + sh - top > height )) && return 1
+        line_top="$next_top"; x="$left"; line_h=0
+    fi
+    (( line_top + sh - top > height )) && return 1
+
+    _PLAN_FIT_TOP="$line_top"
+    _PLAN_FIT_X="$x"
+    _PLAN_FIT_LINEH=$(( sh > line_h ? sh : line_h ))
+    _PLAN_FIT_NEXTX=$(( x + sw ))
+    return 0
+}
+declare -gi _PLAN_FIT_TOP=0 _PLAN_FIT_X=0 _PLAN_FIT_LINEH=0 _PLAN_FIT_NEXTX=0
+
+# How many of these panels a greedy pass would place from here. Places nothing:
+# this is the lookahead asking what a choice costs the ones after it. Answers
+# into _PLAN_WOULD, with the leftovers in _PLAN_WOULD_LEFT.
+_plan_would_place() {
+    local top="$1" left="$2" width="$3" height="$4"
+    local line_top="$5" line_h="$6" x="$7"; shift 7
+    local -a rest=("$@")
+    local count=0 idx shape placed
+    local -a left_over=()
+
+    for idx in ${rest[@]+"${rest[@]}"}; do
+        placed=0
+        _plan_shapes_of "$idx"
+        for shape in ${_PLAN_SHAPES_OUT[@]+"${_PLAN_SHAPES_OUT[@]}"}; do
+            if _plan_fit "$top" "$left" "$width" "$height" \
+                         "$line_top" "$line_h" "$x" "${shape%%x*}" "${shape##*x}"; then
+                line_top="$_PLAN_FIT_TOP"; line_h="$_PLAN_FIT_LINEH"; x="$_PLAN_FIT_NEXTX"
+                count=$(( count + 1 )); placed=1
+                break
+            fi
+        done
+        (( placed == 0 )) && left_over+=("$idx")
+    done
+
+    _PLAN_WOULD_LEFT=(${left_over[@]+"${left_over[@]}"})
+
+    _PLAN_WOULD="$count"
+}
+declare -gi _PLAN_WOULD=0
+declare -ga _PLAN_WOULD_LEFT=()
+
+# One pass, in order, with one step of lookahead per panel.
+#
+# Greedy alone took the largest shape that fit and moved on, which is the thing
+# the header says it does not do: a panel that swallows the line starves the
+# ones after it, and widening the terminal by a single column could make a
+# larger shape legal and delete a panel that had been showing. Twenty
+# regressions in three and a half thousand samples, visible as a panel blinking
+# in and out while the window is dragged.
+#
+# So each shape is scored by how many of the panels after it still fit, and the
+# best score wins, larger area breaking the tie. Nothing is undone and nothing
+# is revisited: it is one extra trial pass per shape, bounded by the shapes a
+# panel declares times the panels on a screen, both of which are handfuls.
 _plan_fill() {
     local top="$1" left="$2" width="$3" height="$4"; shift 4
     local -a want=("$@")
     local -a left_over=()
 
     local line_top="$top" line_h=0 x="$left"
-    local idx shape sw sh placed
+    local i idx shape score
+    local best_shape best_score best_top best_x best_lineh best_nextx
 
-    for idx in ${want[@]+"${want[@]}"}; do
-        placed=0
-        while IFS= read -r shape; do
-            [[ -n "$shape" ]] || continue
-            sw="${shape%%x*}"; sh="${shape##*x}"
-            (( sw > width )) && continue
+    for (( i = 0; i < ${#want[@]}; i++ )); do
+        idx="${want[$i]}"
+        best_shape=""; best_score=-1
 
-            # Wrap when this line has no room left for it.
-            if (( x + sw - left > width )); then
-                local next_top=$(( line_top + line_h ))
-                if (( next_top + sh - top > height )); then continue; fi
-                line_top="$next_top"; x="$left"; line_h=0
+        _plan_shapes_of "$idx"
+        for shape in ${_PLAN_SHAPES_OUT[@]+"${_PLAN_SHAPES_OUT[@]}"}; do
+            _plan_fit "$top" "$left" "$width" "$height" \
+                      "$line_top" "$line_h" "$x" "${shape%%x*}" "${shape##*x}" || continue
+
+            local ftop="$_PLAN_FIT_TOP" fx="$_PLAN_FIT_X"
+            local flh="$_PLAN_FIT_LINEH" fnx="$_PLAN_FIT_NEXTX"
+            _plan_would_place "$top" "$left" "$width" "$height" \
+                              "$ftop" "$flh" "$fnx" ${want[@]:i+1}
+            score="$_PLAN_WOULD"
+            _PLAN_FIT_TOP="$ftop"; _PLAN_FIT_X="$fx"
+            _PLAN_FIT_LINEH="$flh"; _PLAN_FIT_NEXTX="$fnx"
+
+            # Shapes arrive largest first, so `>` keeps the largest of the
+            # shapes that tie, which is the preference the declared order is
+            # sorted into.
+            if (( score > best_score )); then
+                best_score="$score"; best_shape="$shape"
+                best_top="$_PLAN_FIT_TOP"; best_x="$_PLAN_FIT_X"
+                best_lineh="$_PLAN_FIT_LINEH"; best_nextx="$_PLAN_FIT_NEXTX"
             fi
-            (( line_top + sh - top > height )) && continue
+        done
 
-            TUI_PLAN_R[idx]="$line_top"; TUI_PLAN_C[idx]="$x"
-            TUI_PLAN_W[idx]="$sw";       TUI_PLAN_H[idx]="$sh"
-            x=$(( x + sw ))
-            (( sh > line_h )) && line_h="$sh"
-            placed=1
-            break
-        done < <(printf '%s\n' ${TUI_PLAN_SHAPES[$idx]})
-        (( placed == 0 )) && left_over+=("$idx")
+        if [[ -z "$best_shape" ]]; then
+            left_over+=("$idx")
+            continue
+        fi
+
+        TUI_PLAN_R[idx]="$best_top";           TUI_PLAN_C[idx]="$best_x"
+        TUI_PLAN_W[idx]="${best_shape%%x*}";   TUI_PLAN_H[idx]="${best_shape##*x}"
+        line_top="$best_top"; line_h="$best_lineh"; x="$best_nextx"
     done
 
     _PLAN_LEFT=(${left_over[@]+"${left_over[@]}"})
@@ -264,24 +340,36 @@ tui_plan_solve() {
     TUI_PLAN_DROPPED=0
     (( n > 0 )) || return 0
 
-    local main_w="$TUI_PLAN_MAIN_W" main_h="$TUI_PLAN_MAIN_H"
-    (( main_w < 1 )) && main_w=1
-    (( main_h < 1 )) && main_h=1
-    (( main_w > TUI_PLAN_COLS )) && main_w="$TUI_PLAN_COLS"
-    (( main_h > TUI_PLAN_ROWS )) && main_h="$TUI_PLAN_ROWS"
+    # The same clamp the accessors report, so a caller drawing the main region
+    # and the plan placing panels around it are working from one number.
+    local main_w main_h
+    main_w="$(tui_plan_main_w)"
+    main_h="$(tui_plan_main_h)"
 
     for (( i = 0; i < n; i++ )); do
         TUI_PLAN_R[i]=0; TUI_PLAN_C[i]=0; TUI_PLAN_W[i]=0; TUI_PLAN_H[i]=0
     done
 
-    # Priority order: 0 first, since those cannot be dropped and should have
-    # the good space, then ascending.
+    # Priority order: 0 first, since those matter most and should have the
+    # good space, then ascending, ties by declaration order.
+    #
+    # Sorted here rather than by sort(1). Two forks on every keypress was the
+    # smaller reason; the larger one is that the ordering is what makes the
+    # arrangement reproducible, and resting it on how one sort implementation
+    # propagates `-n` to a second key makes the guarantee a property of the
+    # host. A port to another language now has something to match.
     local -a order=()
-    while read -r i; do [[ -n "$i" ]] && order+=("$i"); done < <(
-        for (( i = 0; i < n; i++ )); do
-            printf '%d %d\n' "${TUI_PLAN_PRIO[$i]}" "$i"
-        done | sort -n -k1,1 -k2,2 | awk '{print $2}'
-    )
+    local j
+    for (( i = 0; i < n; i++ )); do order+=("$i"); done
+    for (( i = 1; i < n; i++ )); do
+        local key="${order[$i]}" kp="${TUI_PLAN_PRIO[${order[$i]}]}"
+        j=$(( i - 1 ))
+        while (( j >= 0 )) && (( TUI_PLAN_PRIO[order[j]] > kp )); do
+            order[j+1]="${order[$j]}"
+            j=$(( j - 1 ))
+        done
+        order[j+1]="$key"
+    done
 
     # Beside first: a panel belongs next to the thing it is about, when there
     # is room for it there.

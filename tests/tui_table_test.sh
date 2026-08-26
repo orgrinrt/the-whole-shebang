@@ -161,15 +161,86 @@ it_draws_borders_when_asked() {
 }
 
 #[test]
-it_makes_a_border_as_wide_as_the_columns_it_underlines() {
+it_makes_a_border_exactly_as_wide_as_the_columns_it_underlines() {
+    # Computed, not bounded. This used to assert the rule was at least as long
+    # as a rendered row, which holds by construction because a row has its
+    # trailing spaces trimmed and the rule does not: thirty-five columns of
+    # slack, and any rule width in that range passed.
+    #
+    # Rendered to a file rather than captured, because `$( )` is a subshell and
+    # the column widths it solved are gone by the time the assertion asks for
+    # them.
     _three
-    local out rule body
-    out="$(tui_table_render --width 80 --borders | _strip)"
-    rule="$(grep -m1 -E '^[-─]' <<<"$out")"
-    body="$(grep -m1 'disk-wipe' <<<"$out")"
-    # A rule that is not the width of the table reads as a mistake.
-    assert_ok test "${#rule}" -ge "${#body}"
-    assert_ok test "${#rule}" -le 80
+    local f; f="$(mktemp)"
+    tui_table_render --width 80 --borders > "$f"
+    local rule; rule="$(_strip < "$f" | grep -m1 -E '^[-─]')"
+    rm -f "$f"
+
+    assert_eq "${#rule}" "$(_expected_rule_width)"
+}
+
+#[test]
+it_has_a_detector_that_notices_a_rule_of_the_wrong_width() {
+    # The control. The sum has to be able to disagree with a rule, or the
+    # equality above is another thing that holds whatever the code does.
+    _three
+    local f; f="$(mktemp)"
+    tui_table_render --width 80 --borders > "$f"
+    rm -f "$f"
+    local want; want="$(_expected_rule_width)"
+    assert_ok test "$want" -gt 0
+    local wrong; printf -v wrong '%*s' $(( want + 3 )) ''
+    assert_ne "${#wrong}" "$want"
+}
+
+# What the rule should come to: the shown columns plus one gap between each.
+# Reads the widths the last render solved, so it must be called in the same
+# shell that rendered.
+_expected_rule_width() {
+    local want=0 shown=0 c w
+    for c in name state note; do
+        w="$(tui_table_width "$c")"
+        (( w > 0 )) || continue
+        (( shown > 0 )) && want=$(( want + ${#TUI_TABLE_GAP} ))
+        want=$(( want + w ))
+        shown=$(( shown + 1 ))
+    done
+    printf '%d' "$want"
+}
+
+#[test]
+it_stops_after_the_rows_the_panel_has_room_for() {
+    # A table longer than its box used to run straight through whatever was
+    # laid out underneath, because render had no height at all.
+    _three
+    local out n
+    out="$(tui_table_render --width 80 --height 2 | _strip)"
+    n="$(printf '%s\n' "$out" | grep -c .)"
+    assert_eq "$n" "2"
+}
+
+#[test]
+it_draws_every_row_when_no_height_is_given() {
+    # The control for the clip: a height of nothing must not mean a height of
+    # zero.
+    _three
+    local out n
+    out="$(tui_table_render --width 80 | _strip)"
+    n="$(printf '%s\n' "$out" | grep -c .)"
+    assert_ok test "$n" -gt 2
+}
+
+#[test]
+it_indents_to_the_column_it_was_placed_at_when_it_cannot_move_the_cursor() {
+    # Given a box by tui/plan and writing into a pipe, the row still starts at
+    # the column it was told, because a caller capturing the output is laying
+    # something out too.
+    _three
+    local out first
+    out="$(tui_table_render --width 40 --at 5 11 | _strip)"
+    first="$(printf '%s\n' "$out" | head -1)"
+    assert_eq "${first:0:10}" "          "
+    assert_ne "${first:10:1}" " "
 }
 
 # --- with no terminal --------------------------------------------------------------------
@@ -207,4 +278,50 @@ it_survives_a_width_of_almost_nothing() {
         [[ -n "$line" ]] || continue
         assert_ok test "${#line}" -le 4
     done <<< "$out"
+}
+
+# -----------------------------------------------------------------------------
+# Options with the value forgotten
+#
+# `shift 2` does nothing at all when one argument is left, so an option loop
+# that shifts unguarded never empties and the terminal wedges. Nothing here fed
+# a dangling flag, which is how three of them shipped at once. These run the
+# call in its own process with a watchdog, so the regression fails the suite
+# rather than hanging it.
+# -----------------------------------------------------------------------------
+. "${BASH_SOURCE[0]%/*}/support.sh"
+
+#[test]
+it_finishes_when_head_has_no_text() {
+    assert_ok _finishes 'tui_table_col note 2fr --head'
+}
+
+#[test]
+it_finishes_when_a_passed_through_option_has_no_value() {
+    # `--priority` is not table's own; it is handed to layout, so the hang was
+    # one library down from the call.
+    assert_ok _finishes 'tui_table_col note 2fr --priority'
+}
+
+#[test]
+it_finishes_when_width_has_no_number() {
+    assert_ok _finishes 'tui_table_reset; tui_table_col a 1fr; tui_table_row x; tui_table_render --width'
+}
+
+#[test]
+it_still_reads_an_option_that_does_have_its_value() {
+    # The control: guarding the shift must not stop the option working.
+    tui_table_reset
+    tui_table_col name 1fr --head "task"
+    local out; out="$(tui_table_render --width 40 | _strip)"
+    assert_contains "$out" "task"
+}
+
+#[test]
+it_takes_a_head_of_nothing_without_inventing_one() {
+    tui_table_reset
+    tui_table_col name 1fr --head
+    tui_table_row "x"
+    local out; out="$(tui_table_render --width 40 | _strip)"
+    assert_contains "$out" "x"
 }

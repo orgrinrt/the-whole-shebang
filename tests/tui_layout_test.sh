@@ -352,3 +352,56 @@ it_reports_the_overflow_rather_than_hiding_it() {
     # that fits would be a layout lying about what it placed.
     assert_ok test "$(_sum)" -gt 20
 }
+
+# -----------------------------------------------------------------------------
+# An option with its value forgotten
+# -----------------------------------------------------------------------------
+. "${BASH_SOURCE[0]%/*}/support.sh"
+
+#[test]
+it_finishes_when_priority_has_no_number() {
+    assert_ok _finishes 'tui_layout_reset cols 80; tui_layout_add name 1fr --priority'
+}
+
+#[test]
+it_still_reads_a_priority_that_has_its_number() {
+    tui_layout_reset cols 20
+    tui_layout_add keep 10 --priority 0
+    tui_layout_add drop 10 --priority 9
+    tui_layout_solve
+    assert_ne "$(tui_layout_w keep)" "0"
+}
+
+#[test]
+it_keeps_a_priority_zero_region_that_does_not_fit() {
+    # "0 is never dropped" is a promise about the region, not about the sum.
+    tui_layout_reset cols 10
+    tui_layout_add a 20 --priority 0
+    tui_layout_add b 20 --priority 0
+    tui_layout_solve
+    assert_ok tui_layout_has a
+    assert_ok tui_layout_has b
+    assert_eq "$(tui_layout_size a)" "20"
+}
+
+#[test]
+it_drops_a_lower_priority_region_before_a_priority_zero_one() {
+    tui_layout_reset cols 10
+    tui_layout_add keep 20 --priority 0
+    tui_layout_add go   20 --priority 5
+    tui_layout_solve
+    assert_ok    tui_layout_has keep
+    assert_fails tui_layout_has go
+}
+
+#[test]
+it_lets_the_sum_run_past_the_total_rather_than_shrinking_what_was_not_optional() {
+    # Stated because it is the surprising half. A caller that draws without
+    # clamping will draw past the edge, and that is the caller's job.
+    tui_layout_reset cols 10
+    tui_layout_add a 20 --priority 0
+    tui_layout_add b 20 --priority 0
+    tui_layout_solve
+    local sum=$(( $(tui_layout_size a) + $(tui_layout_size b) ))
+    assert_ok test "$sum" -gt 10
+}

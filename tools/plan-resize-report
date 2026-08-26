@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# =============================================================================
+# the-whole-shebang/tools/plan-resize-report - How often does a resize reshuffle
+# =============================================================================
+#
+# Widening a terminal should not make a panel disappear, and with a flex model
+# it sometimes does: a larger shape becomes legal, the panel takes it, and the
+# line it swallowed was where the next panel was going.
+#
+# This is a report, not a gate. The number is not zero and cannot be made zero
+# without solving bin packing, so there is no threshold worth writing down. It
+# is here so a change to the layout model can be compared against the one
+# before it, on the same inputs.
+#
+# Usage:
+#   tools/plan-resize-report
+# =============================================================================
+
+set -uo pipefail
+HERE="${BASH_SOURCE[0]%/*}/.."
+use() { :; }
+# shellcheck source=/dev/null
+. "${HERE}/libs/tui/plan.sh"
+
+regressions=0
+samples=0
+worst=""
+
+for rows in 8 10 14 16 20 24 30 40; do
+    for main_h in 4 6 10 12 16; do
+        for main_w in 30 40 60; do
+            prev=""
+            for cols in $(seq $(( main_w + 1 )) 4 130); do
+                tui_plan_reset "$cols" "$rows"
+                tui_plan_main "$main_w" "$main_h"
+                tui_plan_panel a 1 30x12 58x5 20x3
+                tui_plan_panel b 2 24x8 40x4
+                tui_plan_panel c 3 20x6
+                tui_plan_panel d 4 11x2 7x9
+                tui_plan_panel e 5 16x4 32x2
+                tui_plan_solve
+                now="$TUI_PLAN_DROPPED"
+                if [[ -n "$prev" ]]; then
+                    samples=$(( samples + 1 ))
+                    if (( now > prev )); then
+                        regressions=$(( regressions + 1 ))
+                        worst="${worst}  ${cols}x${rows} main ${main_w}x${main_h}: ${prev} -> ${now}"$'\n'
+                    fi
+                fi
+                prev="$now"
+            done
+        done
+    done
+done
+
+printf 'widening steps sampled : %d\n' "$samples"
+printf 'steps that dropped more: %d\n' "$regressions"
+if [[ -n "$worst" ]]; then
+    printf '\n%s' "$worst"
+fi

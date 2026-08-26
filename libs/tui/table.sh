@@ -71,7 +71,11 @@ tui_table_col() {
     local head="" rest=""
     while (( $# )); do
         case "$1" in
-            --head) head="${2:-}"; shift 2 ;;
+            # Guarded, because bash refuses `shift 2` when one argument is
+            # left and does not shift at all, so `$#` never reaches zero
+            # and a trailing option flag with its value forgotten spins
+            # this loop forever.
+            --head) head="${2:-}"; shift 2 2>/dev/null || shift $# ;;
             *)      rest="${rest} $1"; shift ;;
         esac
     done
@@ -117,7 +121,18 @@ _tui_table_solve() {
         tui_layout_add "${TUI_TABLE_COL[$i]}" ${TUI_TABLE_SPEC[$i]}
     done
     tui_layout_solve
+
+    # Kept in an array for the render to index. The widths do not change while
+    # a table is being drawn, and asking for each one through a command
+    # substitution is a fork per cell: forty rows of three columns is a hundred
+    # and sixty forks and two hundred milliseconds, on a thing that is supposed
+    # to redraw on a keypress.
+    _TUI_TABLE_W=()
+    for (( i = 0; i < n; i++ )); do
+        _TUI_TABLE_W[i]="${TUI_LAYOUT_SIZE[$i]:-0}"
+    done
 }
+declare -ga _TUI_TABLE_W=()
 
 #[pub]
 # The width a column ended up with, or 0 when it was dropped.
@@ -127,7 +142,11 @@ tui_table_width() {
     tui_layout_size "$1"
 }
 
-# One line of cells, cut to their columns and padded to them.
+# One line of cells, cut to their columns and padded to them. Answers into
+# _TUI_TABLE_LINE rather than printing, so a caller does not need a command
+# substitution, which is a fork, per row.
+declare -g _TUI_TABLE_LINE=""
+
 _tui_table_line() {
     local -a cells=()
     local rest="$1" cell
@@ -140,7 +159,7 @@ _tui_table_line() {
 
     local i n="${#TUI_TABLE_COL[@]}" out="" w text pad
     for (( i = 0; i < n; i++ )); do
-        w="$(tui_table_width "${TUI_TABLE_COL[$i]}")"
+        w="${_TUI_TABLE_W[$i]:-0}"
         (( w > 0 )) || continue                      # dropped on this width
         text="${cells[$i]:-}"
         if declare -F tui_cut >/dev/null 2>&1; then
@@ -162,25 +181,55 @@ _tui_table_line() {
         if declare -F tui_cut >/dev/null 2>&1; then out="$(tui_cut "$out" "$limit")"
         else out="${out:0:$limit}"; fi
     fi
-    printf '%s' "$out"
+    _TUI_TABLE_LINE="$out"
 }
 
 #[pub]
 # Draw it. Every line is at most as wide as the terminal, and a column that
 # does not fit is dropped rather than wrapped.
-# Usage: tui_table_render [--width N] [--borders]
+#
+# `--at ROW COL` draws it into a box somebody else worked out, which is what
+# tui/plan hands you: each line is placed with the cursor rather than written
+# wherever it happens to be. `--height N` stops after N rows, so a table longer
+# than its panel is cut off at the panel's edge instead of running through
+# whatever was laid out underneath. Without either it prints full lines at the
+# cursor, as before.
+# Usage: tui_table_render [--width N] [--at ROW COL] [--height N] [--borders]
 tui_table_render() {
-    local width="${TUI_COLS:-80}" borders=0
+    local width="${TUI_COLS:-80}" borders=0 height=0 at_row=0 at_col=0 indent=""
     while (( $# )); do
         case "$1" in
-            --width)   width="${2:-80}"; shift 2 ;;
+            # Guarded, because bash refuses `shift 2` when one argument is
+            # left and does not shift at all, so `$#` never reaches zero
+            # and a trailing option flag with its value forgotten spins
+            # this loop forever.
+            --width)   width="${2:-80}"; shift 2 2>/dev/null || shift $# ;;
+            --height)  height="${2:-0}"; shift 2 2>/dev/null || shift $# ;;
+            --at)      at_row="${2:-0}"; at_col="${3:-0}"
+                       shift 3 2>/dev/null || shift $# ;;
             --borders) borders=1; shift ;;
             *)         shift ;;
         esac
     done
-    [[ "$width" =~ ^[0-9]+$ ]] || width=80
+    [[ "$width"  =~ ^[0-9]+$ ]] || width=80
+    [[ "$height" =~ ^[0-9]+$ ]] || height=0
+    [[ "$at_row" =~ ^[0-9]+$ ]] || at_row=0
+    [[ "$at_col" =~ ^[0-9]+$ ]] || at_col=0
     (( ${#TUI_TABLE_COL[@]} > 0 )) || return 0
     local _TUI_TABLE_WIDTH="$width"
+    _tui_table_drawn=0
+
+    # Placed rather than printed where the cursor stood. Where the terminal
+    # cannot be moved, spaces put the column right and the row is whatever line
+    # the caller was on, which is the honest degradation for a pipe.
+    local _tui_table_place=""
+    if (( at_row > 0 && at_col > 0 )); then
+        if declare -F tui_move >/dev/null 2>&1 && declare -F tui_is_tty >/dev/null 2>&1 && tui_is_tty; then
+            _tui_table_place="move"
+        else
+            printf -v indent '%*s' $(( at_col - 1 )) ''
+        fi
+    fi
 
     _tui_table_solve "$width" || return 1
 
@@ -197,7 +246,7 @@ tui_table_render() {
         fi
         local shown=0
         for (( i = 0; i < ${#TUI_TABLE_COL[@]}; i++ )); do
-            local w; w="$(tui_table_width "${TUI_TABLE_COL[$i]}")"
+            local w="${_TUI_TABLE_W[$i]:-0}"
             (( w > 0 )) || continue
             (( shown > 0 )) && rule="${rule}${TUI_TABLE_GAP}"
             local seg; printf -v seg '%*s' "$w" ''
@@ -212,17 +261,37 @@ tui_table_render() {
             [[ -n "$head_row" ]] && head_row="${head_row}${_TUI_TABLE_US}"
             head_row="${head_row}${TUI_TABLE_HEAD[$i]}"
         done
-        printf '%s%s%s\n' "${TUI_C_HEAD:-}" "$(_tui_table_line "$head_row")" "${TUI_C_END:-}"
-        (( borders == 1 )) && printf '%s%s%s\n' "${TUI_C_MUTE:-}" "$rule" "${TUI_C_END:-}"
+        _tui_table_line "$head_row"
+        _tui_table_put "${TUI_C_HEAD:-}${_TUI_TABLE_LINE}${TUI_C_END:-}"
+        (( borders == 1 )) && _tui_table_put "${TUI_C_MUTE:-}${rule}${TUI_C_END:-}"
     elif (( borders == 1 )); then
-        printf '%s%s%s\n' "${TUI_C_MUTE:-}" "$rule" "${TUI_C_END:-}"
+        _tui_table_put "${TUI_C_MUTE:-}${rule}${TUI_C_END:-}"
     fi
 
     local row
     for row in ${TUI_TABLE_ROW[@]+"${TUI_TABLE_ROW[@]}"}; do
-        printf '%s\n' "$(_tui_table_line "$row")"
+        if (( height > 0 )) && (( _tui_table_drawn >= height )); then break; fi
+        _tui_table_line "$row"
+        _tui_table_put "$_TUI_TABLE_LINE"
     done
 
-    (( borders == 1 )) && printf '%s%s%s\n' "${TUI_C_MUTE:-}" "$rule" "${TUI_C_END:-}"
+    if (( borders == 1 )); then
+        if (( height == 0 )) || (( _tui_table_drawn < height )); then
+            _tui_table_put "${TUI_C_MUTE:-}${rule}${TUI_C_END:-}"
+        fi
+    fi
     return 0
+}
+
+# One drawn line, at the next row of the box when there is one, and counted so
+# --height can stop.
+declare -gi _tui_table_drawn=0
+_tui_table_put() {
+    if [[ "${_tui_table_place:-}" == "move" ]]; then
+        tui_move $(( at_row + _tui_table_drawn )) "$at_col"
+        printf '%s' "$1"
+    else
+        printf '%s%s\n' "${indent:-}" "$1"
+    fi
+    _tui_table_drawn=$(( _tui_table_drawn + 1 ))
 }

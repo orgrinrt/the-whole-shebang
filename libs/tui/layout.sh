@@ -48,6 +48,8 @@ declare -ga TUI_LAYOUT_WANT=()      # a number, or a share like 2fr
 declare -ga TUI_LAYOUT_MIN=()
 declare -ga TUI_LAYOUT_PRIO=()      # 0 keeps it always; higher goes first
 declare -ga TUI_LAYOUT_SIZE=()      # solved
+declare -ga TUI_LAYOUT_FIXED=()     # the want's fixed size, or 0
+declare -ga TUI_LAYOUT_SHARE=()     # the want's share count, or 0
 declare -ga TUI_LAYOUT_START=()     # solved, 1-based
 declare -g  TUI_LAYOUT_AXIS="rows"
 declare -gi TUI_LAYOUT_TOTAL=0
@@ -60,6 +62,7 @@ declare -ga _TUI_LAYOUT_KEEP=()
 tui_layout_reset() {
     TUI_LAYOUT_NAME=(); TUI_LAYOUT_WANT=(); TUI_LAYOUT_MIN=()
     TUI_LAYOUT_PRIO=(); TUI_LAYOUT_SIZE=(); TUI_LAYOUT_START=()
+    TUI_LAYOUT_FIXED=(); TUI_LAYOUT_SHARE=()
     TUI_LAYOUT_AXIS="${1:-rows}"
 
     local total="${2:-}"
@@ -75,6 +78,12 @@ tui_layout_reset() {
 # Add a region. `want` is a count or a share (`2fr`). `min:N` sets the size
 # below which it is dropped instead of shrunk. `--priority N` decides what goes
 # first when there is not enough room; 0 is never dropped.
+#
+# Never dropped means never dropped, including when it does not fit: regions at
+# priority 0 that together want more than the total keep their sizes and the
+# sum runs past it. Whatever draws them has to clamp the line, which is what
+# tui/table does. Asking for more than there is has to show up somewhere, and
+# silently shrinking something the caller said is not optional is worse.
 # Usage: tui_layout_add <name> <want> [min:N] [--priority N]
 tui_layout_add() {
     local name="$1" want="${2:-1fr}" min=0 prio=0
@@ -82,7 +91,11 @@ tui_layout_add() {
     while (( $# )); do
         case "$1" in
             min:*)       min="${1#min:}"; shift ;;
-            --priority)  prio="${2:-0}"; shift 2 ;;
+            # Guarded, because bash refuses `shift 2` when one argument is
+            # left and does not shift at all, so `$#` never reaches zero
+            # and a trailing option flag with its value forgotten spins
+            # this loop forever.
+            --priority)  prio="${2:-0}"; shift 2 2>/dev/null || shift $# ;;
             *)           shift ;;
         esac
     done
@@ -94,6 +107,13 @@ tui_layout_add() {
     TUI_LAYOUT_PRIO+=("$prio")
     TUI_LAYOUT_SIZE+=(0)
     TUI_LAYOUT_START+=(0)
+    # Read once, here, rather than on every pass of the solve. A want does not
+    # change after it is declared, and asking through a command substitution
+    # is a fork: the solve loops over the regions three times, so a table of
+    # three columns paid a dozen of them per redraw and a redraw happens on
+    # every keypress.
+    TUI_LAYOUT_FIXED+=("$(_tui_layout_fixed "$want")")
+    TUI_LAYOUT_SHARE+=("$(_tui_layout_share "$want")")
 }
 
 # The fixed part of a want, or 0 for a share.
@@ -115,8 +135,8 @@ _tui_layout_share() {
 # is its floor, or one column if it named none.
 _tui_layout_floor() {
     local i="$1" f s
-    f="$(_tui_layout_fixed "${TUI_LAYOUT_WANT[$i]}")"
-    s="$(_tui_layout_share "${TUI_LAYOUT_WANT[$i]}")"
+    f="${TUI_LAYOUT_FIXED[$i]:-0}"
+    s="${TUI_LAYOUT_SHARE[$i]:-0}"
     if (( s > 0 )); then
         if (( TUI_LAYOUT_MIN[i] > 0 )); then printf '%d' "${TUI_LAYOUT_MIN[$i]}"
         else printf '1'; fi
@@ -140,8 +160,8 @@ _tui_layout_attempt() {
 
     for (( i = 0; i < n; i++ )); do
         (( _TUI_LAYOUT_KEEP[i] == 1 )) || continue
-        f="$(_tui_layout_fixed "${TUI_LAYOUT_WANT[$i]}")"
-        sh="$(_tui_layout_share "${TUI_LAYOUT_WANT[$i]}")"
+        f="${TUI_LAYOUT_FIXED[$i]}"
+        sh="${TUI_LAYOUT_SHARE[$i]}"
         if (( sh > 0 )); then
             shares=$(( shares + sh ))
         else
@@ -162,7 +182,7 @@ _tui_layout_attempt() {
         raised=0
         for (( i = 0; i < n; i++ )); do
             (( _TUI_LAYOUT_KEEP[i] == 1 && pinned[i] == 0 )) || continue
-            sh="$(_tui_layout_share "${TUI_LAYOUT_WANT[$i]}")"
+            sh="${TUI_LAYOUT_SHARE[$i]}"
             (( sh > 0 )) || continue
             got=$(( per * sh ))
             if (( got < TUI_LAYOUT_MIN[i] )); then
@@ -186,7 +206,7 @@ _tui_layout_attempt() {
         local extra=$(( left % shares ))
         for (( i = 0; i < n; i++ )); do
             (( _TUI_LAYOUT_KEEP[i] == 1 && pinned[i] == 0 )) || continue
-            sh="$(_tui_layout_share "${TUI_LAYOUT_WANT[$i]}")"
+            sh="${TUI_LAYOUT_SHARE[$i]}"
             (( sh > 0 )) || continue
             got=$(( per * sh ))
             # The remainder goes to the first share rather than vanishing, so

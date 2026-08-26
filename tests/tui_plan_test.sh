@@ -424,48 +424,220 @@ it_counts_only_what_it_actually_dropped() {
 
 #[test]
 it_answers_quickly_enough_to_run_on_every_keypress() {
-    # A menu redraws on every key. The backtracking version this replaced took
-    # two and a half minutes on ten panels that did not all fit, which is not a
-    # slow feature but a hang.
-    local start end
-    start="$(date +%s)"
-    local i
-    for i in 1 2 3 4 5; do
+    # A menu redraws on every key. The version this replaced searched for an
+    # arrangement, which is bin packing, and a screen where the panels did not
+    # all fit took minutes.
+    #
+    # Measured with SECONDS over enough iterations to matter, because `date
+    # +%s` has whole-second resolution and a budget of five seconds against it
+    # really means six: a twenty-fold slowdown would have shipped green. Twenty
+    # build-and-solve rounds of ten panels measure about half a second on the
+    # machine this was written on, so two seconds is a real ceiling rather than
+    # a formality.
+    local i j
+    SECONDS=0
+    for i in $(seq 1 20); do
         tui_plan_reset 100 30
         tui_plan_main 60 20
-        local j
         for j in 1 2 3 4 5 6 7 8 9 10; do
             tui_plan_panel "p$j" "$j" 30x8 40x6 20x12 60x4
         done
         tui_plan_solve
     done
-    end="$(date +%s)"
-    assert_ok test $(( end - start )) -lt 5
+    assert_ok test "$SECONDS" -lt 2
 }
 
 #[test]
 it_places_the_same_way_every_time() {
     # A deterministic pass, not a search whose answer depends on the order it
-    # happened to explore. This is what makes a second implementation, in
-    # another language, checkable against this one.
-    local first second i
-    _arrangement() {
-        tui_plan_reset 120 40
-        tui_plan_main 60 20
-        tui_plan_panel a 1 30x12 58x5
-        tui_plan_panel b 2 24x8  40x4
-        tui_plan_panel c 3 20x6
-        tui_plan_solve
-        local p out=""
-        for p in a b c; do
-            out="${out}${p}:$(tui_plan_row $p),$(tui_plan_col $p),$(tui_plan_w $p),$(tui_plan_h $p) "
-        done
-        printf '%s' "$out"
-    }
-    first="$(_arrangement)"
-    for i in 1 2 3; do
-        second="$(_arrangement)"
-        assert_eq "$second" "$first"
+    # happened to explore. Pinned as a literal, so a port to another language
+    # has something to match: the old version was also deterministic per input,
+    # so a test that only compared four runs of the same code passed on the
+    # model this one replaced and certified nothing about the change.
+    assert_eq "$(_plan_arrangement 1 2 3)" "a:1,61,30,12 b:1,91,24,8 c:13,61,20,6"
+}
+
+#[test]
+it_places_the_same_way_whatever_the_caller_set_ifs_to() {
+    # A library is sourced into somebody else's shell and `IFS` is a normal
+    # thing for them to set. Splitting a panel's shapes on it yielded `30x6`
+    # for a panel that declared `30x12` and `44x6`: a width from the first
+    # shape, a height from the last, a size nobody asked for.
+    local out
+    out="$(IFS=$'\n'; _plan_arrangement 1 2 3)"
+    assert_eq "$out" "a:1,61,30,12 b:1,91,24,8 c:13,61,20,6"
+    out="$(IFS=:; _plan_arrangement 1 2 3)"
+    assert_eq "$out" "a:1,61,30,12 b:1,91,24,8 c:13,61,20,6"
+    out="$(IFS=x; _plan_arrangement 1 2 3)"
+    assert_eq "$out" "a:1,61,30,12 b:1,91,24,8 c:13,61,20,6"
+}
+
+#[test]
+it_places_the_same_way_in_any_locale() {
+    local out l
+    for l in C en_US.UTF-8 de_DE.UTF-8 fi_FI.UTF-8 tr_TR.UTF-8; do
+        out="$(LC_ALL="$l" _plan_arrangement 1 2 3)"
+        assert_eq "$out" "a:1,61,30,12 b:1,91,24,8 c:13,61,20,6"
     done
-    unset -f _arrangement
+}
+
+#[test]
+it_breaks_a_tie_in_priority_by_the_order_they_were_declared() {
+    # Equal priorities are the one input where the ordering could be ambiguous,
+    # and the test that existed never fed them. With ten or more panels an
+    # ordering that sorted the index as text would put 10 before 2 and lay the
+    # whole screen out differently.
+    assert_eq "$(_plan_arrangement 5 5 5)" "a:1,61,30,12 b:1,91,24,8 c:13,61,20,6"
+    assert_eq "$(_plan_arrangement 0 0 0)" "a:1,61,30,12 b:1,91,24,8 c:13,61,20,6"
+}
+
+#[test]
+it_keeps_declaration_order_past_ten_panels() {
+    # Ten is where a text sort stops agreeing with a numeric one.
+    tui_plan_reset 200 60
+    tui_plan_main 40 10
+    local j
+    for j in $(seq 1 12); do tui_plan_panel "p$j" 4 10x4; done
+    tui_plan_solve
+    # First declared, first placed, so p1 sits left of p2 and p2 left of p3.
+    assert_ok test "$(tui_plan_col p1)" -lt "$(tui_plan_col p2)"
+    assert_ok test "$(tui_plan_col p2)" -lt "$(tui_plan_col p3)"
+    assert_ok test "$(tui_plan_col p9)" -lt "$(tui_plan_col p10)"
+}
+
+#[test]
+it_only_ever_places_a_panel_at_a_size_it_declared() {
+    # The invariant nothing asserted, and the one that catches a shape list
+    # split on the wrong separator. Swept, not sampled.
+    local wrong="" cols rows p shape found
+    for cols in 40 57 58 60 80 100 120; do
+        for rows in 10 16 20 30; do
+            tui_plan_reset "$cols" "$rows"
+            tui_plan_main 30 8
+            tui_plan_panel a 1 30x12 58x5 20x3
+            tui_plan_panel b 2 24x8 40x4
+            tui_plan_panel c 3 20x6
+            tui_plan_solve
+            for p in a b c; do
+                tui_plan_has "$p" || continue
+                shape="$(tui_plan_w "$p")x$(tui_plan_h "$p")"
+                case "$p" in
+                    a) found=" 30x12 58x5 20x3 " ;;
+                    b) found=" 24x8 40x4 " ;;
+                    c) found=" 20x6 " ;;
+                esac
+                [[ "$found" == *" ${shape} "* ]] || wrong="${wrong} ${cols}x${rows}:${p}=${shape}"
+            done
+        done
+    done
+    assert_empty "$wrong"
+}
+
+#[test]
+it_has_a_detector_that_notices_a_size_nobody_declared() {
+    # The control for the sweep above. Its zero means nothing until the
+    # membership test is shown saying no to something, and `30x6` is the exact
+    # size the shape list produced when it was split on the wrong separator.
+    _declared() { case " $1 " in *" $2 "*) return 0 ;; *) return 1 ;; esac; }
+    assert_ok   _declared "30x12 58x5 20x3" "58x5"
+    assert_ok   _declared "30x12 58x5 20x3" "30x12"
+    assert_fails _declared "30x12 58x5 20x3" "30x6"
+    assert_fails _declared "30x12 58x5 20x3" "44x6"
+    unset -f _declared
+}
+
+#[test]
+it_does_not_delete_a_panel_when_the_terminal_gets_wider() {
+    # Greedy alone took the largest shape that fit, so a shape becoming legal
+    # one column later swallowed the line the next panel needed. Both of these
+    # fit side by side; the largest-first choice dropped one of them.
+    tui_plan_reset 100 10
+    tui_plan_main 60 10
+    tui_plan_panel a 1 40x10 20x10
+    tui_plan_panel b 2 20x10
+    tui_plan_solve
+    assert_eq "$TUI_PLAN_DROPPED" "0"
+    assert_ok tui_plan_has a
+    assert_ok tui_plan_has b
+}
+
+#[test]
+it_prefers_the_bigger_shape_when_nothing_else_wants_the_room() {
+    # The other half: the lookahead must not make it timid. With nobody after
+    # it, the panel takes the largest shape it declared.
+    tui_plan_reset 100 10
+    tui_plan_main 60 10
+    tui_plan_panel a 1 40x10 20x10
+    tui_plan_solve
+    assert_eq "$(tui_plan_w a)" "40"
+}
+
+# The arrangement three panels come out with, as one line, so a test can pin it
+# as a literal and a port in another language has something exact to match.
+# Takes the three priorities.
+_plan_arrangement() {
+    tui_plan_reset 120 40
+    tui_plan_main 60 20
+    tui_plan_panel a "$1" 30x12 58x5
+    tui_plan_panel b "$2" 24x8  40x4
+    tui_plan_panel c "$3" 20x6
+    tui_plan_solve
+    local p out=""
+    for p in a b c; do
+        out="${out}${p}:$(tui_plan_row $p),$(tui_plan_col $p),$(tui_plan_w $p),$(tui_plan_h $p) "
+    done
+    printf '%s' "${out% }"
+}
+
+#[test]
+it_reports_the_main_region_it_placed_everything_around() {
+    # The first thing a caller needs and the one thing there was no getter for:
+    # to draw the main region it had to re-implement solve's clamping by hand.
+    tui_plan_reset 120 40
+    tui_plan_main 60 20
+    tui_plan_solve
+    assert_eq "$(tui_plan_main_w)" "60"
+    assert_eq "$(tui_plan_main_h)" "20"
+}
+
+#[test]
+it_clamps_a_main_region_bigger_than_the_screen() {
+    tui_plan_reset 40 10
+    tui_plan_main 200 200
+    tui_plan_solve
+    assert_eq "$(tui_plan_main_w)" "40"
+    assert_eq "$(tui_plan_main_h)" "10"
+}
+
+#[test]
+it_clamps_a_main_region_of_nothing_up_to_one() {
+    tui_plan_reset 40 10
+    tui_plan_main 0 0
+    tui_plan_solve
+    assert_eq "$(tui_plan_main_w)" "1"
+    assert_eq "$(tui_plan_main_h)" "1"
+}
+
+#[test]
+it_never_places_a_panel_inside_the_region_it_reports() {
+    # The accessors and the placement have to agree, or a caller drawing the
+    # main region at the reported size draws over a panel.
+    local bad="" cols rows p mw mh
+    for cols in 40 80 120; do
+        for rows in 10 24 40; do
+            tui_plan_reset "$cols" "$rows"
+            tui_plan_main 200 12
+            tui_plan_panel a 1 20x4
+            tui_plan_panel b 2 30x6
+            tui_plan_solve
+            mw="$(tui_plan_main_w)"; mh="$(tui_plan_main_h)"
+            for p in a b; do
+                tui_plan_has "$p" || continue
+                if (( $(tui_plan_row "$p") <= mh )) && (( $(tui_plan_col "$p") <= mw )); then
+                    bad="${bad} ${cols}x${rows}:${p}"
+                fi
+            done
+        done
+    done
+    assert_empty "$bad"
 }
