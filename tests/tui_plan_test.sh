@@ -290,3 +290,110 @@ it_forgets_the_previous_plan() {
     assert_fails tui_plan_has gone
     assert_ok    tui_plan_has other
 }
+
+# --- the claim, checked against something that does not share its reasoning ---------
+#
+# "Drops the fewest" was asserted at four hand-computed points, and every one
+# of them happened to be a case the old lossy split got right. A law stated as
+# universal and checked at four chosen instantiations is the sampled-law shape:
+# the 18% it got wrong was never named.
+#
+# So: a second placer that shares no code with the one under test. Plain shelf
+# packing, which is deliberately weaker — it finds fewer arrangements than
+# optimal — so anything it places that the real one drops is a real loss and
+# not an artefact of a cleverer comparison.
+
+# Shelves: fill a row left to right, drop to the next when the row is full.
+# Prints how many of the given WxH panels it placed in a WxH region.
+_shelf_places() {
+    local rw="$1" rh="$2"; shift 2
+    local x=0 y=0 shelf_h=0 placed=0 spec w h
+    for spec in "$@"; do
+        w="${spec%%x*}"; h="${spec##*x}"
+        if (( x + w > rw )); then
+            y=$(( y + shelf_h )); x=0; shelf_h=0
+        fi
+        (( y + h > rh )) && continue
+        (( x + w > rw )) && continue
+        x=$(( x + w )); (( h > shelf_h )) && shelf_h="$h"
+        placed=$(( placed + 1 ))
+    done
+    printf '%d' "$placed"
+}
+
+#[test]
+it_places_at_least_what_plain_shelf_packing_would() {
+    # A sweep, not four points. Every panel is droppable, so the only thing
+    # being compared is how many found room.
+    local cols rows n bad="" i
+    for cols in 60 80 100 140; do
+        for rows in 20 26 34 40; do
+            for n in 2 3 4; do
+                tui_plan_reset "$cols" "$rows"
+                # No main region worth speaking of: the whole screen is the
+                # area both placers are working in, so the comparison is fair.
+                tui_plan_main 1 1
+                local -a shapes=()
+                for (( i = 0; i < n; i++ )); do
+                    tui_plan_panel "p$i" $(( i + 1 )) 60x4
+                    shapes+=("60x4")
+                done
+                tui_plan_solve
+
+                local mine=0
+                for (( i = 0; i < n; i++ )); do
+                    tui_plan_has "p$i" && mine=$(( mine + 1 ))
+                done
+                local theirs
+                theirs="$(_shelf_places $(( cols - 1 )) $(( rows - 1 )) "${shapes[@]}")"
+                (( mine < theirs )) && bad+="${cols}x${rows}/${n}:${mine}<${theirs} "
+            done
+        done
+    done
+    assert_empty "$bad"
+}
+
+#[test]
+it_places_at_least_what_shelf_packing_would_with_mixed_shapes() {
+    local cols rows bad=""
+    for cols in 70 90 120 160; do
+        for rows in 22 30 40; do
+            tui_plan_reset "$cols" "$rows"
+            tui_plan_main 1 1
+            tui_plan_panel a 1 40x6
+            tui_plan_panel b 2 30x8
+            tui_plan_panel c 3 50x4
+            tui_plan_panel d 4 20x10
+            tui_plan_solve
+            local mine=0 p
+            for p in a b c d; do tui_plan_has "$p" && mine=$(( mine + 1 )); done
+            local theirs
+            theirs="$(_shelf_places $(( cols - 1 )) $(( rows - 1 )) 40x6 30x8 50x4 20x10)"
+            (( mine < theirs )) && bad+="${cols}x${rows}:${mine}<${theirs} "
+        done
+    done
+    assert_empty "$bad"
+}
+
+#[test]
+it_has_an_oracle_that_can_actually_disagree() {
+    # The positive control. An oracle that always agrees proves nothing, so:
+    # a region that plainly holds three panels, and a count that says three.
+    assert_eq "$(_shelf_places 200 40 60x4 60x4 60x4)" "3"
+    # And one that plainly holds none of them.
+    assert_eq "$(_shelf_places 10 4 60x4 60x4)" "0"
+}
+
+#[test]
+it_keeps_three_panels_that_all_fit_in_one_region() {
+    tui_plan_reset 200 20
+    tui_plan_main 1 1
+    tui_plan_panel a 1 60x4
+    tui_plan_panel b 2 60x4
+    tui_plan_panel c 3 60x4
+    tui_plan_solve
+    # The worst case the sweep found: two of three dropped into a region that
+    # holds all three, because the leftover arm of the L had been discarded.
+    assert_eq "$TUI_PLAN_DROPPED" "0"
+    assert_empty "$(_overlaps)"
+}

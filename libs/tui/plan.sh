@@ -172,6 +172,70 @@ _plan_shapes_by_area() {
     done | sort -rn | awk '{print $2}'
 }
 
+# Free space, as a set of overlapping maximal rectangles.
+#
+# One rectangle cannot describe what is left after taking a bite out of
+# another: the remainder is an L, and keeping one arm of it throws the other
+# away. Keeping both arms as separate rectangles is better and still loses,
+# because a panel can only use the arm it was offered.
+#
+# So the free space is every maximal rectangle that fits in it, which overlap
+# each other on purpose. Placing something splits every free rectangle it
+# touches into the pieces to its left, right, above and below, and any
+# rectangle wholly inside another is then dropped as saying nothing new.
+_plan_split_all() {
+    local pr="$1" pc="$2" pw="$3" ph="$4"
+    local pr2=$(( pr + ph )) pc2=$(( pc + pw ))
+    local -a out=()
+    local rect fr fc fw fh
+
+    for rect in ${_PLAN_FREE[@]+"${_PLAN_FREE[@]}"}; do
+        read -r fr fc fw fh <<< "$rect"
+        (( fw > 0 && fh > 0 )) || continue
+        local fr2=$(( fr + fh )) fc2=$(( fc + fw ))
+
+        # No overlap: kept whole.
+        if (( pc >= fc2 || pc2 <= fc || pr >= fr2 || pr2 <= fr )); then
+            out+=("$rect"); continue
+        fi
+
+        # Left of it.
+        (( pc > fc ))   && out+=("$fr $fc $(( pc - fc )) $fh")
+        # Right of it.
+        (( pc2 < fc2 )) && out+=("$fr $pc2 $(( fc2 - pc2 )) $fh")
+        # Above it.
+        (( pr > fr ))   && out+=("$fr $fc $fw $(( pr - fr ))")
+        # Below it.
+        (( pr2 < fr2 )) && out+=("$pr2 $fc $fw $(( fr2 - pr2 ))")
+    done
+
+    # Anything wholly inside another rectangle says nothing the other does not,
+    # and left in, the list grows without bound as panels are placed.
+    _PLAN_FREE=()
+    local i j n="${#out[@]}" keep
+    for (( i = 0; i < n; i++ )); do
+        read -r fr fc fw fh <<< "${out[$i]}"
+        (( fw > 0 && fh > 0 )) || continue
+        keep=1
+        for (( j = 0; j < n; j++ )); do
+            (( i == j )) && continue
+            local gr gc gw gh
+            read -r gr gc gw gh <<< "${out[$j]}"
+            (( gw > 0 && gh > 0 )) || continue
+            if (( fr >= gr && fc >= gc && fr + fh <= gr + gh && fc + fw <= gc + gw )); then
+                # Identical rectangles would each contain the other, so the
+                # earlier one wins and the later is dropped.
+                if (( fr == gr && fc == gc && fw == gw && fh == gh )); then
+                    (( j < i )) && { keep=0; break; }
+                else
+                    keep=0; break
+                fi
+            fi
+        done
+        (( keep == 1 )) && _PLAN_FREE+=("${out[$i]}")
+    done
+}
+
 # Place the panels from _PLAN_ORDER[at] onwards. Returns 0 when every one of
 # them found a home.
 _plan_place() {
@@ -193,14 +257,7 @@ _plan_place() {
             saved=("${_PLAN_FREE[@]}")
             TUI_PLAN_R[idx]="$fr"; TUI_PLAN_C[idx]="$fc"
             TUI_PLAN_W[idx]="$sw"; TUI_PLAN_H[idx]="$sh"
-
-            # What is left of that rectangle, split along its longer side so
-            # the remainder is usable rather than a sliver.
-            if (( fw - sw >= fh - sh )); then
-                _PLAN_FREE[j]="$fr $(( fc + sw )) $(( fw - sw )) $fh"
-            else
-                _PLAN_FREE[j]="$(( fr + sh )) $fc $fw $(( fh - sh ))"
-            fi
+            _plan_split_all "$fr" "$fc" "$sw" "$sh"
 
             if _plan_place $(( at + 1 )); then return 0; fi
 
