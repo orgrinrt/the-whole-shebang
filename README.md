@@ -21,8 +21,7 @@ ref = "main"
 ```
 
 ```bash
-#!/usr/bin/env bash
-. "${0%/*}/lib/nutshell/init"
+#!/usr/bin/env nutshell
 
 use shebang::diagnostics
 
@@ -109,9 +108,22 @@ colours, its progress and the user's real scrollback to gain a border.
 ## Tests
 
 ```bash
-git submodule update --init
 ./test
 ./test tests/tui_term_test.sh
+```
+
+`test` resolves nutshell itself through `lib/find-nutshell`, pinned at `dev`.
+That file is a byte for byte copy of nutshell's own resolver, because a project
+cannot use the resolver to find the resolver. It is kept in step by
+`tests/find_nutshell_copy_test.sh`, which compares the two and fails when they
+have moved apart; a stale one is otherwise quiet, resolving what it understood
+when it was copied and not knowing a pin shape added since.
+`SHEBANG_NUTSHELL_REF` names another. There is nothing to initialise: a copy of
+nutshell in the tree is a second version that drifts from the machine's in
+silence, so this carries the resolver and not the interpreter.
+
+```bash
+./check
 ```
 
 ## License
