@@ -2,8 +2,8 @@
 # Tests for the report.
 #
 # Two contracts. The exit status has to be usable by something that never reads
-# the text -- a hook, a cron line, another script -- so "nothing wrong", "worth
-# a look" and "broken" must stay distinguishable. And every failure has to
+# the text (a hook, a cron line, another script), so "nothing wrong", "worth a
+# look" and "broken" must stay distinguishable. And every failure has to
 # appear in the summary underneath, because by the time thirty checks have run
 # the one that failed is off the top of the screen, and a report that hides it
 # there is a report that wasted the run.
@@ -213,7 +213,7 @@ it_does_not_let_one_enormous_name_wreck_the_table() {
 it_writes_no_control_bytes_with_no_terminal() {
     # The colour variables are set here, deliberately, to real escapes. The
     # first version of this test blanked them and then asserted that no escapes
-    # appeared -- proving only that it had blanked them, in the one place a
+    # appeared, proving only that it had blanked them, in the one place a
     # reader would look to find out whether the module is safe in a pipe.
     local RED=$'\033[31m' GREEN=$'\033[32m' YELLOW=$'\033[33m'
     local DIM=$'\033[2m'  BOLD=$'\033[1m'  NC=$'\033[0m'
@@ -274,4 +274,52 @@ it_prints_a_row_with_no_note_at_all() {
     # 2>&1 inside the substitution, or the diagnostic this looks for goes to
     # stderr, is never captured, and the assertion cannot fail.
     assert_fails grep -qi 'unbound' <<<"$out"
+}
+
+# --- recording from an exit status ------------------------------------------------
+
+#[test]
+it_records_a_success_from_a_command_that_worked() {
+    tui_report_reset
+    tui_report_run "a check" "would have failed" true
+    assert_eq "$(tui_report_count ok)"   "1"
+    assert_eq "$(tui_report_count fail)" "0"
+}
+
+#[test]
+it_records_a_failure_with_the_note_it_was_given() {
+    tui_report_reset
+    tui_report_run "a check" "the reason it matters" false
+    assert_eq "$(tui_report_count fail)" "1"
+    assert_ok grep -q 'the reason it matters' <<<"$(tui_report_show | _strip)"
+}
+
+#[test]
+it_keeps_a_commands_output_out_of_the_report() {
+    tui_report_reset
+    tui_report_run "noisy" "note" bash -c 'echo to-stdout; echo to-stderr >&2; true'
+    local out; out="$(tui_report_show | _strip)"
+    # A report is a table. A command that prints a page would destroy it.
+    assert_fails grep -q 'to-stdout' <<<"$out"
+    assert_fails grep -q 'to-stderr' <<<"$out"
+}
+
+#[test]
+it_passes_the_arguments_the_command_needs() {
+    tui_report_reset
+    tui_report_run "args" "note" bash -c '[[ "$1" == "expected" ]]' _ expected
+    assert_eq "$(tui_report_count ok)" "1"
+}
+
+#[test]
+it_cuts_a_name_too_long_for_its_column() {
+    tui_report_reset
+    tui_report_row ok "$(printf 'x%.0s' {1..80})" "note"
+    tui_report_row ok "short" "note"
+    local out c1 c2; out="$(tui_report_show | _strip)"
+    c1="$(awk '/note/ { print index($0, "note"); exit }' <<<"$out")"
+    c2="$(awk '/note/ { n = index($0, "note") } END { print n }' <<<"$out")"
+    # Both notes in the same column. Padding cannot shorten an over-long name,
+    # so without cutting it the row runs past where the header said it would.
+    assert_eq "$c2" "$c1"
 }

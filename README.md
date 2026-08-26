@@ -47,7 +47,7 @@ found, 1 when something blocking was, and 3 when something needs judgement.
 
 ## tui
 
-Five modules for a terminal interface, taken on their own like everything else
+Eight modules for a terminal interface, taken on their own like everything else
 here. Written for a bootable maintenance tool, which set the constraints.
 
 `tui/term` enters and leaves a full-screen session and puts the terminal back

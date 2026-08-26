@@ -6,7 +6,7 @@
 # https://github.com/orgrinrt/the-whole-shebang
 #
 # For work we are doing ourselves and can count: fourteen packages, six
-# partitions, thirty checks. Not for relaying somebody else's progress -- pacman
+# partitions, thirty checks. Not for relaying somebody else's progress: pacman
 # and rsync draw their own bars and draw them better, and a bar wrapped around a
 # bar is two bars fighting over one line.
 #
@@ -48,6 +48,7 @@ declare -gi _TUI_PROG_OPEN=0
 declare -gi _TUI_PROG_TOTAL=0
 declare -gi _TUI_PROG_DONE=0
 declare -gi _TUI_PROG_SPIN=0
+declare -gi _TUI_PROG_FAILED=0
 declare -g  _TUI_PROG_TITLE=""
 declare -gi _TUI_PROG_START=0
 
@@ -83,6 +84,7 @@ tui_progress_open() {
     _TUI_PROG_TITLE="$title"
     _TUI_PROG_DONE=0
     _TUI_PROG_SPIN=0
+    _TUI_PROG_FAILED=0
     _TUI_PROG_OPEN=1
     _TUI_PROG_START="$(printf '%(%s)T' -1 2>/dev/null || date +%s)"
     _tui_progress_marks
@@ -103,6 +105,19 @@ tui_progress_step() {
     (( _TUI_PROG_OPEN == 1 )) || return 0
     _TUI_PROG_DONE=$(( _TUI_PROG_DONE + 1 ))
     _tui_progress_draw "${1:-}"
+}
+
+#[pub]
+# One more done, and it did not work. Counted like any other step, because the
+# run is as far along either way, and named so the end of the run can say how
+# many failed instead of a fourteen-package fetch reporting fourteen successes
+# when three of them failed.
+# Usage: tui_progress_fail [label]
+tui_progress_fail() {
+    (( _TUI_PROG_OPEN == 1 )) || return 0
+    _TUI_PROG_DONE=$(( _TUI_PROG_DONE + 1 ))
+    _TUI_PROG_FAILED=$(( _TUI_PROG_FAILED + 1 ))
+    _tui_progress_draw "${1:+${1} (failed)}"
 }
 
 #[pub]
@@ -234,13 +249,16 @@ tui_progress_close() {
     took=$(( now - _TUI_PROG_START ))
     (( took < 0 )) && took=0
 
+    local failed=""
+    (( _TUI_PROG_FAILED > 0 )) && printf -v failed ', %d failed' "$_TUI_PROG_FAILED"
+
     if ! tui_is_tty; then
-        printf '  done, %d in %ds%s\n' "$_TUI_PROG_DONE" "$took" \
+        printf '  done, %d in %ds%s%s\n' "$_TUI_PROG_DONE" "$took" "$failed" \
             "${1:+ (${1})}"
         return 0
     fi
     printf '\r'
     tui_clear_line 2>/dev/null || true
-    printf '  %sdone%s  %d in %ds%s\n' "$_TUI_PROG_GREEN" "$_TUI_PROG_NC" "$_TUI_PROG_DONE" "$took" \
-        "${1:+  ${1}}"
+    printf '  %sdone%s  %d in %ds%s%s\n' "$_TUI_PROG_GREEN" "$_TUI_PROG_NC" \
+        "$_TUI_PROG_DONE" "$took" "$failed" "${1:+  ${1}}"
 }

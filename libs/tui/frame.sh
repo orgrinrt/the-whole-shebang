@@ -47,15 +47,15 @@ use color
 
 declare -gi _TUI_FRAME_OPEN=0
 declare -g  _TUI_FRAME_TITLE=""
-declare -gi TUI_FRAME_WIDTH=0     # inner width, set by tui_frame_open
+declare -gi TUI_FRAME_WIDTH=0     # drawn width less the two borders
 declare -gi _TUI_FRAME_PLAIN=0    # drawing without a border at all
 
 # Declared here, with the safe set as the default, rather than created inside
 # whichever branch happens to run. The open flag used to be set before the
-# branch that made these, so a frame opened before tui_probe -- "reading
-# config", the obvious first thing a tool says -- left the flag claiming a
-# frame was open with no glyphs behind it, and the next line drawn died on an
-# unbound variable. term.sh declares all of its state at file scope for exactly
+# branch that made these. A frame opened before tui_probe, saying "reading
+# config" as the first thing a tool says, left the flag claiming a frame was
+# open with no glyphs behind it, and the next line drawn died on an unbound
+# variable. term.sh declares all of its state at file scope for exactly
 # this reason.
 declare -g _TUI_F_TL="+" _TUI_F_TR="+" _TUI_F_BL="+" _TUI_F_BR="+"
 declare -g _TUI_F_H="-"  _TUI_F_V="|"  _TUI_F_ELL="..."
@@ -132,8 +132,8 @@ tui_frame_vis() {
     local s
     # One pass, and it forks. An earlier version did a substitution first and
     # then threw the result away by recomputing from the argument, under a
-    # comment saying it avoided the fork -- the exact shape this module was
-    # rewritten to remove.
+    # comment saying it avoided the fork. That is the exact shape this module
+    # was rewritten to remove.
     s="$(printf '%s' "$1" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' 2>/dev/null)" || s="$1"
     printf '%d' "${#s}"
 }
@@ -225,7 +225,11 @@ tui_frame_close() {
 # A whole frame in one call, for the common case of saying a few fixed lines.
 # Usage: tui_frame_box <title> [line...]
 tui_frame_box() {
-    local title="${1:-}"; shift 2>/dev/null || true
+    local title="${1:-}"
+    # `shift` with no arguments left fails and, under set -e in a caller's
+    # shell, takes the whole run with it. Guarded by the count, not by a
+    # redirect that hides the message without preventing the failure.
+    (( $# > 0 )) && shift
     tui_frame_open "$title"
     local l
     for l in "$@"; do tui_frame_say "$l"; done
@@ -234,9 +238,9 @@ tui_frame_box() {
 
 #[pub]
 # Run something whose output belongs to it, not to us. Nothing is framed,
-# captured or reformatted -- it streams as it would have without us, which for
-# a session on the alternate screen means handing the screen back first. That
-# is tui_suspend's job and this does not reimplement it.
+# captured or reformatted. It streams as it would have without us, which for a
+# session on the alternate screen means handing the screen back first. That is
+# tui_suspend's job and this does not reimplement it.
 # Usage: tui_frame_foreign <command> [args...] -> returns the command's status
 tui_frame_foreign() {
     local was="$_TUI_FRAME_OPEN" rc

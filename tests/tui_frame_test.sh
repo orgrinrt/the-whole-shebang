@@ -273,9 +273,9 @@ it_survives_an_empty_body() {
 # --- state that exists before it is needed --------------------------------------
 #
 # The open flag used to be set before the branch that created the glyphs, so a
-# frame opened before tui_probe -- "reading config", the first thing a tool
-# says -- left the flag claiming a frame was open with nothing behind it. The
-# next line drawn died on an unbound variable, under set -u, on the way in.
+# frame opened before tui_probe, saying "reading config" as the first thing a
+# tool says, left the flag claiming a frame was open with nothing behind it.
+# The next line drawn died on an unbound variable, under set -u, on the way in.
 
 #[test]
 it_survives_a_frame_opened_before_the_terminal_was_probed() {
@@ -300,7 +300,7 @@ it_survives_a_frame_opened_before_the_terminal_was_probed() {
 it_has_usable_glyphs_before_anything_opens_a_frame() {
     # Reading them, not drawing with them. The first version of this test never
     # opened a frame, so it never reached a glyph, and it passed against the
-    # code that crashed -- which makes it a test of nothing.
+    # code that crashed, which makes it a test of nothing.
     local out
     out="$(set -u
         . "${BASH_SOURCE[0]%/*}/../lib/nutshell/init"
@@ -345,7 +345,7 @@ it_does_not_cut_a_character_in_half() {
     out="$(LC_ALL=C LC_CTYPE=C LANG=C TUI_COLS=40 tui_frame_box 'T' "$body" 2>&1)"
     # Decoded rather than grepped. A lone lead byte is what a split character
     # leaves behind, and the byte-class greps that look like they would find it
-    # do not -- checked, they match nothing either way.
+    # do not. Checked: they match nothing either way.
     assert_ok python3 -c '
 import sys
 raw = sys.stdin.buffer.read()

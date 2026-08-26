@@ -278,7 +278,7 @@ _tui_lead_len() {
 # A string cut to n characters with the mark on the end.
 #
 # In a non-UTF-8 locale bash indexes bytes, so a plain cut can land inside a
-# character and leave a lone lead byte on screen -- which is the corruption the
+# character and leave a lone lead byte on screen. That is the corruption the
 # ASCII fallback exists to prevent, arriving by another door. Only a sequence
 # that is actually incomplete is removed: an earlier version stripped whole
 # characters that were never split.
@@ -319,7 +319,7 @@ tui_cut() {
 #
 # TUI_TTY and TUI_COLOR used to stay at their defaults until tui_begin ran, and
 # a module that gates its colour on TUI_COLOR then printed none at all for a
-# caller that sources it and calls it -- which is what every usage header in
-# this collection shows. Probing at load makes the flags mean something from
-# the first line, and tui_probe stays callable for a size that changed.
+# caller that sources it and calls it, which is what every usage header in this
+# collection shows. Probing at load makes the flags mean something from the
+# first line, and tui_probe stays callable for a size that changed.
 tui_probe 2>/dev/null || true

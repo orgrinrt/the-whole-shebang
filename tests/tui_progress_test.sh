@@ -4,7 +4,7 @@
 # The arithmetic is separated out precisely so it can be pinned here. A bar
 # that reads 101%, or that never quite reaches the right edge, or that divides
 # by a total of zero, is the kind of thing found by a user and not by a
-# developer -- the developer always runs it with ten items.
+# developer. The developer always runs it with ten items.
 
 use test
 
@@ -196,15 +196,15 @@ it_jumps_to_a_count_for_work_finished_in_batches() {
 # --- the half that draws --------------------------------------------------------
 #
 # Every test above sets TUI_TTY=0, so the spinner, the label budget and the
-# width clamp had no coverage at all -- and two real bugs lived in exactly
-# there. What was easy to test got tested.
+# width clamp had no coverage at all, and two real bugs lived in exactly there.
+# What was easy to test got tested.
 
 _pstrip() { sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'; }
 
 # Absolute. Relative paths inside `bash -c` resolve against the caller's
 # directory, so run from anywhere but the repo root these sourced nothing at
-# all -- and the test asserting no colour then passed because there was no
-# module loaded to produce any.
+# all, and the test asserting no colour then passed because there was no module
+# loaded to produce any.
 PROOT="$(cd "${BASH_SOURCE[0]%/*}/.." && pwd)"
 # The widest line actually drawn, in characters, with the carriage returns that
 # separate redraws turned into line breaks.
@@ -346,4 +346,59 @@ it_says_how_long_it_took() {
     # "Did that hang or is it just slow" is the question a bar exists to
     # answer, and the answer is worth keeping after it finishes.
     assert_ok grep -qE 'done.*1 in [0-9]+s' <<<"$out"
+}
+
+# --- steps that did not work ------------------------------------------------------
+
+#[test]
+it_counts_a_failed_step_as_progress() {
+    TUI_TTY=0
+    local out
+    out="$(tui_progress_open 3 "T"; tui_progress_step a; tui_progress_fail b; tui_progress_step c; tui_progress_close)"
+    # The run is as far along either way.
+    assert_ok grep -q 'done, 3' <<<"$out"
+}
+
+#[test]
+it_says_how_many_failed() {
+    TUI_TTY=0
+    local out
+    out="$(tui_progress_open 3 "T"; tui_progress_fail a; tui_progress_fail b; tui_progress_step c; tui_progress_close)"
+    # A fourteen-package fetch reporting fourteen successes when three of them
+    # failed is the failure this exists to prevent.
+    assert_ok grep -q '2 failed' <<<"$out"
+}
+
+#[test]
+it_says_nothing_about_failures_when_there_were_none() {
+    TUI_TTY=0
+    local out
+    out="$(tui_progress_open 2 "T"; tui_progress_step a; tui_progress_step b; tui_progress_close)"
+    assert_fails grep -q 'failed' <<<"$out"
+}
+
+#[test]
+it_names_the_step_that_failed() {
+    TUI_TTY=0
+    local out
+    out="$(tui_progress_open 2 "T"; tui_progress_fail "linux-firmware"; tui_progress_close)"
+    assert_ok grep -q 'linux-firmware' <<<"$out"
+    assert_ok grep -q 'failed'         <<<"$out"
+}
+
+#[test]
+it_forgets_the_failures_of_the_previous_run() {
+    TUI_TTY=0
+    local out
+    out="$(tui_progress_open 1 "A"; tui_progress_fail x; tui_progress_close)"
+    assert_ok grep -q '1 failed' <<<"$out"
+    out="$(tui_progress_open 1 "B"; tui_progress_step y; tui_progress_close)"
+    assert_fails grep -q 'failed' <<<"$out"
+}
+
+#[test]
+it_ignores_a_failure_with_no_run_open() {
+    TUI_TTY=0
+    local out; out="$(tui_progress_fail "orphan")"
+    assert_eq "$out" ""
 }

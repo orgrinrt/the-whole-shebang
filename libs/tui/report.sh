@@ -94,8 +94,8 @@ tui_report_worst() {
 
 #[pub]
 # An exit status for the whole run. 0 when nothing is wrong, 1 when something
-# failed, 2 when nothing failed but something is worth looking at -- so that a
-# caller can tell "fine" from "fine for now" without parsing the output.
+# failed, 2 when nothing failed but something is worth looking at. A caller can
+# then tell "fine" from "fine for now" without parsing the output.
 # Usage: exit "$(tui_report_exit)"
 tui_report_exit() {
     case "$(tui_report_worst)" in
@@ -136,6 +136,19 @@ _tui_report_mark() {
 }
 
 #[pub]
+# Record a result from a command's exit status, which is the shape every caller
+# writes by hand otherwise: run a thing, look at $?, pick ok or fail.
+# Usage: tui_report_run <name> <note-on-failure> <command> [args...]
+tui_report_run() {
+    local name="$1" note="$2"; shift 2
+    if "$@" >/dev/null 2>&1; then
+        tui_report_row ok "$name"
+    else
+        tui_report_row fail "$name" "$note"
+    fi
+}
+
+#[pub]
 # Print the report.
 # Usage: tui_report_show [title]
 tui_report_show() {
@@ -155,14 +168,20 @@ tui_report_show() {
         len="${#TUI_REPORT_NAME[$i]}"
         (( len > w )) && w="$len"
     done
+    # Capped, so one pathological name cannot push every note off the right of
+    # the screen. A name longer than the cap is cut rather than allowed to
+    # overrun its column: %-*s pads a short value but does not shorten a long
+    # one, so without the cut the row is wider than the header promised.
     (( w > 32 )) && w=32
 
     [[ -n "$title" ]] && printf '\n%s%s%s\n\n' "$_TUI_R_BOLD" "$title" "$_TUI_R_NC"
 
     for (( i = 0; i < n; i++ )); do
+        local nm="${TUI_REPORT_NAME[$i]}"
+        (( ${#nm} > w )) && nm="${nm:0:$(( w - 1 ))}+"
         printf '  %s  %-*s  %s%s%s\n' \
             "$(_tui_report_mark "${TUI_REPORT_STATUS[$i]}")" \
-            "$w" "${TUI_REPORT_NAME[$i]}" \
+            "$w" "$nm" \
             "$_TUI_R_DIM" "${TUI_REPORT_NOTE[$i]}" "$_TUI_R_NC"
     done
 
