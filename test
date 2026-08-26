@@ -2,8 +2,8 @@
 # =============================================================================
 # the-whole-shebang/test - Run the test suite
 # =============================================================================
-# Every `#[test]` function under tests/. An entry point, so it bootstraps
-# nutshell from the submodule rather than relying on an installed interpreter.
+# Every `#[test]` function under tests/. An entry point, so it resolves
+# nutshell itself before there is a nutshell to ask.
 #
 # Usage:
 #   ./test                          everything
@@ -14,11 +14,19 @@
 set -uo pipefail
 HERE="${BASH_SOURCE[0]%/*}"
 
-if [[ ! -f "$HERE/lib/nutshell/init" ]]; then
-    printf 'nutshell is missing. Run: git submodule update --init\n' >&2
-    exit 1
-fi
-. "$HERE/lib/nutshell/init"
+# shellcheck source=/dev/null
+. "$HERE/lib/find-nutshell"
+nutshell_find "" "${SHEBANG_NUTSHELL_REF:-dev}" || exit 1
+# shellcheck source=/dev/null
+. "$NUTSHELL_INIT"
+
+# Resolved once, and everything a test starts inherits it. Without this each
+# subshell resolves the pin again, and the tests set their own XDG directories,
+# so the resolution stamp is somewhere else every time and every one of them
+# asks the remote. A suite that reaches the network is a suite that fails on a
+# train.
+NUTSHELL_HOME="${NUTSHELL_INIT%/init}"
+export NUTSHELL_HOME NUTSHELL_INIT
 
 use test log
 

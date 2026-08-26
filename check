@@ -7,8 +7,8 @@
 # the config was decorative: three files were over the limit it sets and the
 # number nobody could see said so.
 #
-# An entry point, so it bootstraps nutshell from the submodule rather than
-# relying on an installed interpreter.
+# An entry point, so it resolves nutshell itself before there is a nutshell to
+# ask.
 #
 # Usage:
 #   ./check
@@ -17,9 +17,13 @@
 set -uo pipefail
 HERE="${BASH_SOURCE[0]%/*}"
 
-if [[ ! -x "$HERE/lib/nutshell/check" ]]; then
-    printf 'nutshell is missing. Run: git submodule update --init\n' >&2
-    exit 1
-fi
+# shellcheck source=/dev/null
+. "$HERE/lib/find-nutshell"
+nutshell_find "" "${SHEBANG_NUTSHELL_REF:-dev}" || exit 1
 
-exec "$HERE/lib/nutshell/check" "$@"
+root="${NUTSHELL_INIT%/init}"
+[[ -x "${root}/check" ]] || {
+    printf 'the nutshell at %s has no check in it\n' "$root" >&2
+    exit 1
+}
+exec "${root}/check" "$@"
