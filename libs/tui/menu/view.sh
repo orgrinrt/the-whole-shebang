@@ -258,16 +258,6 @@ tui_menu_heading_at() {
     fi
     printf '%s' "$label"
 }
-
-# How many rows are on screen. The view is the truth; the full list is only the
-# fallback for a caller that never built one.
-# How many rows the reader can see.
-#
-# The view, and only the view. Falling back to the raw count when the view was
-# empty turned "nothing matches" into "everything", silently, which is the
-# worst answer a filter can give.
-_tui_menu_len() { printf '%d' "${#TUI_MENU_VIEW[@]}"; }
-
 # The next index the cursor may rest on, moving by <step>, wrapping at the ends.
 #
 # Wrapping, because a list is a ring: down from the last row is the first, and
@@ -278,7 +268,7 @@ _tui_menu_len() { printf '%d' "${#TUI_MENU_VIEW[@]}"; }
 # A step larger than one is a page, and a page does not wrap: paging past the
 # end lands on the end, which is what every list with a page key does.
 _tui_menu_step() {
-    local from="$1" step="$2" n i tries; n="$(_tui_menu_len)"
+    local from="$1" step="$2" n i tries; n=${#TUI_MENU_VIEW[@]}
     (( n > 0 )) || { printf '%d' "$from"; return 0; }
 
     if (( step > 1 || step < -1 )); then
@@ -316,7 +306,7 @@ _tui_menu_step() {
 # what every editor's paragraph movement does and what a reader expects from a
 # key that means "back a section".
 _tui_menu_section_step() {
-    local from="$1" step="$2" n; n="$(_tui_menu_len)"
+    local from="$1" step="$2" n; n=${#TUI_MENU_VIEW[@]}
     (( n > 0 )) || { printf '%d' "$from"; return 0; }
 
     if (( step > 0 )); then
@@ -338,7 +328,7 @@ _tui_menu_section_step() {
 # The nearest heading from <from>, moving by <step>, wrapping. <from> itself is
 # never the answer.
 _tui_menu_next_heading() {
-    local from="$1" step="$2" n i tries raw; n="$(_tui_menu_len)"
+    local from="$1" step="$2" n i tries raw; n=${#TUI_MENU_VIEW[@]}
     i="$from"
     for (( tries = 0; tries < n; tries++ )); do
         i=$(( (i + step + n) % n ))
@@ -353,7 +343,7 @@ _tui_menu_next_heading() {
 # Not "the first landable at or after <from>", which is <from> itself for any
 # row and makes "back to the top of this section" a move that never happens.
 _tui_menu_section_top() {
-    local from="$1" n i tries raw; n="$(_tui_menu_len)"
+    local from="$1" n i tries raw; n=${#TUI_MENU_VIEW[@]}
     (( n > 0 )) || { printf '%d' "$from"; return 0; }
 
     # Back to the heading at or above it. A list with no headings at all has no
@@ -378,7 +368,7 @@ _tui_menu_section_top() {
 # First index the cursor may rest on. Used for the initial position, which is
 # otherwise index 0 and therefore usually a heading.
 _tui_menu_first() {
-    local n i=0; n="$(_tui_menu_len)"
+    local n i=0; n=${#TUI_MENU_VIEW[@]}
     while (( i < n )); do
         _tui_menu_landable "$i" && { printf '%d' "$i"; return 0; }
         i=$(( i + 1 ))
@@ -390,7 +380,7 @@ _tui_menu_first() {
 # last time. Keeps the cursor on screen while moving the window as little as
 # possible, so the list does not jump under the reader on every keypress.
 _tui_menu_window() {
-    local cursor="$1" height="$2" top="$3" n; n="$(_tui_menu_len)"
+    local cursor="$1" height="$2" top="$3" n; n=${#TUI_MENU_VIEW[@]}
     (( height < 1 )) && height=1
     (( cursor <  top ))               && top=$cursor
     (( cursor >= top + height ))      && top=$(( cursor - height + 1 ))

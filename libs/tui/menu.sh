@@ -267,7 +267,7 @@ tui_menu_run() {
                 # Filtered down to nothing is a blank screen with no way out
                 # but q, so it turns itself back off rather than stranding
                 # somebody in an empty list.
-                if (( $(_tui_menu_len) == 0 )); then
+                if (( ${#TUI_MENU_VIEW[@]} == 0 )); then
                     tui_menu_filter_on ""
                     tui_menu_refilter
                     cursor="$(_tui_menu_first)"
@@ -289,7 +289,7 @@ tui_menu_run() {
                 continue
             fi
             if tui_key_is_accept; then
-                (( $(_tui_menu_len) > 0 )) || continue
+                (( ${#TUI_MENU_VIEW[@]} > 0 )) || continue
                 raw="${TUI_MENU_VIEW[$cursor]:-$cursor}"
                 TUI_MENU_CHOICE="${TUI_MENU_ID[$raw]}"
                 tui_raw_off; return 0
@@ -313,7 +313,7 @@ tui_menu_run() {
                     cursor="$(_tui_menu_first)"; top=0; continue ;;
                 ctrl-c) tui_raw_off; return 1 ;;
                 enter)
-                    (( $(_tui_menu_len) > 0 )) || continue
+                    (( ${#TUI_MENU_VIEW[@]} > 0 )) || continue
                     raw="${TUI_MENU_VIEW[$cursor]:-$cursor}"
                     TUI_MENU_CHOICE="${TUI_MENU_ID[$raw]}"
                     tui_raw_off; return 0 ;;
@@ -343,11 +343,11 @@ tui_menu_run() {
         # Only movement is absorbed. The first key that is not movement ends
         # the run and is handed back, so nothing that acts on a row is ever
         # swallowed by a scroll.
-        motion="$(tui_key_motion)"
+        tui_key_motion_now; motion="$TUI_MOTION"
         if _tui_menu_is_motion "$motion"; then
             local more
             while tui_key_read_now; do
-                more="$(tui_key_motion)"
+                tui_key_motion_now; more="$TUI_MOTION"
                 if ! _tui_menu_is_motion "$more"; then
                     tui_key_unread
                     break

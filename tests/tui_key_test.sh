@@ -160,3 +160,51 @@ it_does_not_treat_an_ordinary_key_as_either_answer() {
 it_is_safe_to_source_twice() {
     assert_ok . "${BASH_SOURCE[0]%/*}/../libs/tui/key.sh"
 }
+
+# --- the same answer without a subshell --------------------------------------
+#
+# The absorb loop reads this every key, and a command substitution is a fork.
+# `tools/absorb-cost-report` measures what one costs; the property asserted
+# here is the one that makes the loop able to avoid it, which is that the
+# answer survives in the caller's own shell.
+
+#[test]
+it_leaves_the_motion_in_a_variable() {
+    TUI_MOTION=""
+    TUI_KEY="j"
+    tui_key_motion_now
+    # No `$( )` anywhere above. A function that only printed would leave this
+    # empty, which is precisely the failure being guarded against.
+    assert_eq "$TUI_MOTION" "down"
+}
+
+#[test]
+it_maps_the_same_keys_both_ways() {
+    # Two spellings of one answer is two answers waiting to disagree. Every key
+    # the printing form knows about, not a sample of them.
+    local k
+    for k in up down left right k j h l tab shift-tab enter q '/' '?' '[' ']' \
+             home end pgup pgdn ctrl-up ctrl-down alt-x esc backspace \
+             $'\020' $'\016' $'\002' $'\006' ''; do
+        TUI_KEY="$k"
+        TUI_MOTION=""
+        tui_key_motion_now
+        assert_eq "$TUI_MOTION" "$(tui_key_motion)"
+    done
+}
+
+#[test]
+it_passes_through_a_key_that_is_not_movement() {
+    TUI_KEY="enter"; tui_key_motion_now; assert_eq "$TUI_MOTION" "enter"
+    TUI_KEY="q";     tui_key_motion_now; assert_eq "$TUI_MOTION" "q"
+    TUI_KEY="";      tui_key_motion_now; assert_eq "$TUI_MOTION" ""
+}
+
+#[test]
+it_overwrites_the_last_answer_rather_than_keeping_it() {
+    # A loop reads this repeatedly. A stale value from the previous key would
+    # absorb a keystroke that was meant to act on a row.
+    TUI_KEY="down"; tui_key_motion_now
+    TUI_KEY="enter"; tui_key_motion_now
+    assert_eq "$TUI_MOTION" "enter"
+}
