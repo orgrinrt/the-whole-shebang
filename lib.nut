@@ -10,6 +10,8 @@ tui::frame               libs/tui/frame.sh
 tui::key                 libs/tui/key.sh
 tui::layout              libs/tui/layout.sh
 tui::menu                libs/tui/menu.sh
+tui::menu::draw          libs/tui/menu/draw.sh
+tui::menu::view          libs/tui/menu/view.sh
 tui::modal               libs/tui/modal.sh
 tui::plan                libs/tui/plan.sh
 tui::progress            libs/tui/progress.sh

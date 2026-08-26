@@ -11,6 +11,8 @@ use test
 . "${BASH_SOURCE[0]%/*}/../libs/tui/key.sh"
 . "${BASH_SOURCE[0]%/*}/../libs/tui/layout.sh"
 . "${BASH_SOURCE[0]%/*}/../libs/tui/menu.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/menu/view.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/menu/draw.sh"
 
 # heading, three entries, heading, two entries
 fixture() {
@@ -254,11 +256,14 @@ it_drops_a_heading_whose_entries_all_vanish() {
 #[test]
 it_keeps_a_heading_whose_entries_survive() {
     # The control for the heading rule: dropping every heading would satisfy
-    # the test above.
+    # the test above. Asked through the accessor, because the view holds a
+    # heading as an index that is not a row.
     fixture
     TUI_MENU_TEXT=(Disk Alpha Beta Gamma Boot Delta Epsilon)
     TUI_MENU_FILTER="alpha"; tui_menu_refilter
-    assert_eq "${TUI_MENU_VIEW[0]}" "0"
+    assert_eq "$(tui_menu_heading_at 0)" "Disk"
+    assert_fails tui_menu_raw 0
+    TUI_MENU_FILTER=""
 }
 
 #[test]
@@ -508,11 +513,10 @@ it_finds_a_row_by_the_name_it_is_called_by() {
     # `iso-fetch` found nothing, because only the label was searched.
     TUI_MENU_FILTER="fe"
     tui_menu_refilter
-    local found=""
-    local i
-    for i in "${TUI_MENU_VIEW[@]}"; do
-        [[ "${TUI_MENU_STATE[$i]}" == "heading" ]] && continue
-        found="${found}${TUI_MENU_ID[$i]} "
+    local found="" i raw
+    for i in "${!TUI_MENU_VIEW[@]}"; do
+        raw="$(tui_menu_raw "$i")" || continue
+        found="${found}${TUI_MENU_ID[$raw]} "
     done
     assert_eq "$found" "iso-fetch "
     TUI_MENU_FILTER=""
@@ -683,4 +687,197 @@ it_does_not_fold_a_modified_arrow_into_plain_motion() {
     assert_eq "$(tui_key_motion)" "ctrl-down"
     TUI_KEY="down"
     assert_eq "$(tui_key_motion)" "down"
+}
+
+# --- grouping, sorting, and a filter that is not a search --------------------
+
+_menu_kinds() {
+    tui_menu_reset
+    TUI_MENU_GROUP=section; TUI_MENU_SORT=declared
+    TUI_MENU_FILTERS=(); TUI_MENU_FILTER_ON=""
+    tui_menu_heading disk
+    tui_menu_entry disk-health "Zebra check"  ok  "" check
+    tui_menu_entry disk-wipe   "apple erase"  off "" action
+    tui_menu_heading net
+    tui_menu_entry net-status  "Mango check"  ok  "" check
+    tui_menu_entry net-doctor  "Beta fix"     ok  "" fix
+    tui_menu_refilter
+}
+
+# The labels the reader sees, headings in angle brackets, as one line.
+_menu_shape() {
+    local i raw out=""
+    for i in "${!TUI_MENU_VIEW[@]}"; do
+        if raw="$(tui_menu_raw "$i")"; then out="${out}${TUI_MENU_TEXT[$raw]}|"
+        else out="${out}<$(tui_menu_heading_at "$i")>|"; fi
+    done
+    printf '%s' "$out"
+}
+
+#[test]
+it_groups_by_the_section_it_was_declared_under() {
+    _menu_kinds
+    assert_eq "$(_menu_shape)" "<disk>|Zebra check|apple erase|<net>|Mango check|Beta fix|"
+}
+
+#[test]
+it_groups_by_kind_instead() {
+    # The declared headings are the wrong headings once the cut changes, so the
+    # grouping makes its own rather than keeping them.
+    _menu_kinds
+    TUI_MENU_GROUP=kind; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "<check>|Zebra check|Mango check|<action>|apple erase|<fix>|Beta fix|"
+}
+
+#[test]
+it_drops_the_headings_entirely_when_asked() {
+    _menu_kinds
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "Zebra check|apple erase|Mango check|Beta fix|"
+}
+
+#[test]
+it_sorts_by_name_inside_a_group() {
+    # Inside, not across: sorting the whole list alphabetically would
+    # interleave the groups, which is the thing grouping exists to stop.
+    _menu_kinds
+    TUI_MENU_SORT=name; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "<disk>|apple erase|Zebra check|<net>|Beta fix|Mango check|"
+}
+
+#[test]
+it_sorts_case_insensitively() {
+    # `apple` before `Zebra` rather than after it: two alphabets is not an
+    # order anybody reads.
+    _menu_kinds
+    TUI_MENU_GROUP=none; TUI_MENU_SORT=name; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "apple erase|Beta fix|Mango check|Zebra check|"
+}
+
+#[test]
+it_sorts_what_can_be_run_to_the_top() {
+    # The order somebody scanning for something to do wants: the rows they can
+    # act on above the ones they cannot.
+    _menu_kinds
+    TUI_MENU_GROUP=none; TUI_MENU_SORT=state; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "Beta fix|Mango check|Zebra check|apple erase|"
+}
+
+#[test]
+it_leaves_the_declared_order_alone_by_default() {
+    # The control for the two sorts. A list somebody arranged by hand is
+    # arranged for a reason.
+    _menu_kinds
+    TUI_MENU_GROUP=none; TUI_MENU_SORT=declared; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "Zebra check|apple erase|Mango check|Beta fix|"
+}
+
+#[test]
+it_cycles_the_grouping_and_comes_back_round() {
+    _menu_kinds
+    tui_menu_group_next; assert_eq "$TUI_MENU_GROUP" "kind"
+    tui_menu_group_next; assert_eq "$TUI_MENU_GROUP" "none"
+    tui_menu_group_next; assert_eq "$TUI_MENU_GROUP" "section"
+}
+
+#[test]
+it_cycles_the_ordering_and_comes_back_round() {
+    _menu_kinds
+    tui_menu_sort_next; assert_eq "$TUI_MENU_SORT" "name"
+    tui_menu_sort_next; assert_eq "$TUI_MENU_SORT" "state"
+    tui_menu_sort_next; assert_eq "$TUI_MENU_SORT" "declared"
+}
+
+#[test]
+it_filters_by_a_question_rather_than_by_text() {
+    # The distinction the search cannot cover: "the ones I can run" is not a
+    # word that appears in any row.
+    _menu_kinds
+    _only_runnable() { [[ "${TUI_MENU_STATE[$1]}" == "ok" ]]; }
+    tui_menu_filter runnable _only_runnable
+    tui_menu_filter_on runnable
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    unset -f _only_runnable
+    assert_eq "$(_menu_shape)" "Zebra check|Mango check|Beta fix|"
+}
+
+#[test]
+it_keeps_everything_with_no_filter_on() {
+    # The control: a filter that is off has to change nothing.
+    _menu_kinds
+    _only_runnable() { [[ "${TUI_MENU_STATE[$1]}" == "ok" ]]; }
+    tui_menu_filter runnable _only_runnable
+    tui_menu_filter_on ""
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    unset -f _only_runnable
+    assert_eq "$(_menu_shape)" "Zebra check|apple erase|Mango check|Beta fix|"
+}
+
+#[test]
+it_combines_the_filter_with_the_search() {
+    # They are separate questions and both apply.
+    _menu_kinds
+    _only_runnable() { [[ "${TUI_MENU_STATE[$1]}" == "ok" ]]; }
+    tui_menu_filter runnable _only_runnable
+    tui_menu_filter_on runnable
+    TUI_MENU_GROUP=none; TUI_MENU_FILTER="check"; tui_menu_refilter
+    TUI_MENU_FILTER=""
+    unset -f _only_runnable
+    assert_eq "$(_menu_shape)" "Zebra check|Mango check|"
+}
+
+#[test]
+it_cycles_through_the_filters_and_back_to_none() {
+    _menu_kinds
+    _a() { return 0; }; _b() { return 0; }
+    tui_menu_filter one _a
+    tui_menu_filter two _b
+    tui_menu_filter_on ""
+    assert_eq "$(_tui_menu_filter_next)" "one"
+    tui_menu_filter_on one
+    assert_eq "$(_tui_menu_filter_next)" "two"
+    tui_menu_filter_on two
+    assert_empty "$(_tui_menu_filter_next)"
+    unset -f _a _b
+}
+
+#[test]
+it_ignores_a_filter_whose_function_is_gone() {
+    # A caller that registered a filter and then unset the function should get
+    # every row, not none of them: a menu that empties itself because of a
+    # missing helper is a menu nobody can use.
+    _menu_kinds
+    tui_menu_filter ghost _no_such_predicate
+    tui_menu_filter_on ghost
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "Zebra check|apple erase|Mango check|Beta fix|"
+}
+
+#[test]
+it_puts_rows_with_no_kind_under_one_heading() {
+    # Grouping by a thing half the rows do not declare still has to produce a
+    # list, and a row with no kind is not a row with an empty kind.
+    tui_menu_reset
+    TUI_MENU_GROUP=kind; TUI_MENU_SORT=declared
+    TUI_MENU_FILTERS=(); TUI_MENU_FILTER_ON=""
+    tui_menu_heading s
+    tui_menu_entry a "A" ok "" check
+    tui_menu_entry b "B" ok ""
+    tui_menu_refilter
+    assert_eq "$(_menu_shape)" "<check>|A|<other>|B|"
+}
+
+#[test]
+it_never_leaves_the_cursor_on_a_heading_after_regrouping() {
+    # Every arrangement has to leave a landable first row, or the first key
+    # press goes somewhere nobody asked for.
+    local g so bad=""
+    for g in section kind none; do
+        for so in declared name state; do
+            _menu_kinds
+            TUI_MENU_GROUP="$g"; TUI_MENU_SORT="$so"; tui_menu_refilter
+            _tui_menu_landable "$(_tui_menu_first)" || bad="${bad} ${g}/${so}"
+        done
+    done
+    assert_empty "$bad"
 }
