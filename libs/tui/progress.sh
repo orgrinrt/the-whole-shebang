@@ -5,10 +5,16 @@
 # Part of the-whole-shebang. Built on nutshell, sourced on its own.
 # https://github.com/orgrinrt/the-whole-shebang
 #
-# For work we are doing ourselves and can count: fourteen packages, six
-# partitions, thirty checks. Not for relaying somebody else's progress: pacman
-# and rsync draw their own bars and draw them better, and a bar wrapped around a
-# bar is two bars fighting over one line.
+# For work whose size we know and whose progress we can measure ourselves:
+# fourteen packages, six partitions, thirty checks, or the bytes of a file as
+# it grows.
+#
+# Not for relaying somebody else's bar. Pacman and rsync draw their own and
+# draw them better, and a bar wrapped around a bar is two bars fighting over
+# one line. Measuring the thing yourself is a different act: a caller that
+# silences a downloader and watches the file instead has one bar and one source
+# of truth, and that survives a resume, which parsing the downloader's output
+# does not.
 #
 # The honest cases are handled rather than faked. Work whose size is not known
 # gets a spinner, not a bar creeping to 90% and stopping, because a bar that
@@ -28,6 +34,12 @@
 #   tui_progress_close
 #
 #   tui_progress_open 0 "Scanning"     # size unknown: a spinner
+#
+#   # Counted in bytes rather than in steps, so the close says 1.1 GiB
+#   # rather than 1236641792.
+#   tui_progress_open "$total" "Fetching the image" bytes
+#   tui_progress_set "$(stat -f %z "$f")"
+#   tui_progress_fail "the transfer stopped"     # failed: not "done"
 # =============================================================================
 
 [[ -n "${_SHEBANG_TUI_PROGRESS_SH:-}" ]] && return 0
@@ -51,6 +63,7 @@ declare -gi _TUI_PROG_SPIN=0
 declare -gi _TUI_PROG_FAILED=0
 declare -g  _TUI_PROG_TITLE=""
 declare -gi _TUI_PROG_START=0
+declare -g  _TUI_PROG_UNIT="steps"
 
 _TUI_PROG_SPINNER='|/-\'
 
@@ -63,23 +76,32 @@ _tui_progress_marks() { _TUI_PROG_ELL="$(tui_ellipsis)"; }
 
 # Styling, but only when the terminal said so, so that this module and term.sh
 # agree about one session rather than two libraries deciding separately.
-declare -g _TUI_PROG_DIM="" _TUI_PROG_BOLD="" _TUI_PROG_GREEN="" _TUI_PROG_NC=""
+declare -g _TUI_PROG_DIM="" _TUI_PROG_BOLD="" _TUI_PROG_GREEN="" _TUI_PROG_RED="" _TUI_PROG_NC=""
 _tui_progress_styles() {
     if (( ${TUI_COLOR:-0} == 1 )) && tui_is_tty; then
         _TUI_PROG_DIM="$DIM"; _TUI_PROG_BOLD="$BOLD"
-        _TUI_PROG_GREEN="$GREEN"; _TUI_PROG_NC="$NC"
+        _TUI_PROG_GREEN="$GREEN"; _TUI_PROG_RED="$RED"; _TUI_PROG_NC="$NC"
     else
-        _TUI_PROG_DIM=""; _TUI_PROG_BOLD=""; _TUI_PROG_GREEN=""; _TUI_PROG_NC=""
+        _TUI_PROG_DIM=""; _TUI_PROG_BOLD=""; _TUI_PROG_GREEN=""
+        _TUI_PROG_RED=""; _TUI_PROG_NC=""
     fi
 }
 
 #[pub]
 # Start counting. A total of 0 means the size is not known, which is a
 # different thing from there being nothing to do.
-# Usage: tui_progress_open <total> [title]
+#
+# The unit is what the count is counted in. `steps` is the default and reads
+# as a tally; `bytes` renders the same numbers as sizes, so a finished transfer
+# closes with `1.1 GiB in 412s` rather than with the byte count spelled out.
+# Anything else is taken as `steps`, because a bar that refused to draw over a
+# misspelling would be worse than one that counts.
+# Usage: tui_progress_open <total> [title] [steps|bytes]
 tui_progress_open() {
-    local total="${1:-0}" title="${2:-}"
+    local total="${1:-0}" title="${2:-}" unit="${3:-steps}"
     [[ "$total" =~ ^[0-9]+$ ]] || total=0
+    [[ "$unit" == "bytes" ]] || unit="steps"
+    _TUI_PROG_UNIT="$unit"
     _TUI_PROG_TOTAL="$total"
     _TUI_PROG_TITLE="$title"
     _TUI_PROG_DONE=0
@@ -174,6 +196,34 @@ tui_progress_pct() {
     printf '%d' $(( done * 100 / total ))
 }
 
+#[pub]
+# A byte count as somebody reads it.
+#
+# Integer arithmetic and binary units. A console this is reached for on a
+# broken machine has no `bc`, and a transfer does not need a second decimal
+# place.
+# Usage: tui_bytes <n> -> "1.1 GiB"
+tui_bytes() {
+    local n="${1:-0}"
+    [[ "$n" =~ ^[0-9]+$ ]] || n=0
+    if   (( n >= 1073741824 )); then
+        printf '%s.%s GiB' "$(( n / 1073741824 ))" \
+            "$(( (n % 1073741824) * 10 / 1073741824 ))"
+    elif (( n >= 1048576 )); then printf '%s MiB' "$(( n / 1048576 ))"
+    elif (( n >= 1024 ));    then printf '%s KiB' "$(( n / 1024 ))"
+    else printf '%s B' "$n"
+    fi
+}
+
+# One count, in whatever the run is counted in.
+_tui_progress_amount() {
+    if [[ "$_TUI_PROG_UNIT" == "bytes" ]]; then
+        tui_bytes "${1:-0}"
+    else
+        printf '%s' "${1:-0}"
+    fi
+}
+
 _tui_progress_draw() {
     local label="${1:-}"
 
@@ -181,7 +231,9 @@ _tui_progress_draw() {
         # A log gets one line per step and no redrawing, because a carriage
         # return in a file is a line nobody can read afterwards.
         if (( _TUI_PROG_TOTAL > 0 )); then
-            printf '  [%d/%d] %s\n' "$_TUI_PROG_DONE" "$_TUI_PROG_TOTAL" "$label"
+            printf '  [%s/%s] %s\n' \
+                "$(_tui_progress_amount "$_TUI_PROG_DONE")" \
+                "$(_tui_progress_amount "$_TUI_PROG_TOTAL")" "$label"
         else
             printf '  %s\n' "$label"
         fi
@@ -252,13 +304,41 @@ tui_progress_close() {
     local failed=""
     (( _TUI_PROG_FAILED > 0 )) && printf -v failed ', %d failed' "$_TUI_PROG_FAILED"
 
+    local amount; amount="$(_tui_progress_amount "$_TUI_PROG_DONE")"
+
     if ! tui_is_tty; then
-        printf '  done, %d in %ds%s%s\n' "$_TUI_PROG_DONE" "$took" "$failed" \
+        printf '  done, %s in %ds%s%s\n' "$amount" "$took" "$failed" \
             "${1:+ (${1})}"
         return 0
     fi
     printf '\r'
     tui_clear_line 2>/dev/null || true
-    printf '  %sdone%s  %d in %ds%s%s\n' "$_TUI_PROG_GREEN" "$_TUI_PROG_NC" \
-        "$_TUI_PROG_DONE" "$took" "$failed" "${1:+  ${1}}"
+    printf '  %sdone%s  %s in %ds%s%s\n' "$_TUI_PROG_GREEN" "$_TUI_PROG_NC" \
+        "$amount" "$took" "$failed" "${1:+  ${1}}"
+}
+
+#[pub]
+# Give up, and say so rather than saying done.
+#
+# A run that stopped part way is not a run that finished, and closing it with
+# `done` is the bar telling the reader the opposite of what happened. Takes the
+# reason, since a bar that stops without one leaves nowhere to look.
+# Usage: tui_progress_stop <reason>
+tui_progress_stop() {
+    (( _TUI_PROG_OPEN == 1 )) || return 0
+    _TUI_PROG_OPEN=0
+    local now took amount
+    now="$(printf '%(%s)T' -1 2>/dev/null || date +%s)"
+    took=$(( now - _TUI_PROG_START ))
+    (( took < 0 )) && took=0
+    amount="$(_tui_progress_amount "$_TUI_PROG_DONE")"
+
+    if ! tui_is_tty; then
+        printf '  stopped at %s after %ds%s\n' "$amount" "$took" "${1:+ (${1})}"
+        return 0
+    fi
+    printf '\r'
+    tui_clear_line 2>/dev/null || true
+    printf '  %sstopped%s  at %s after %ds%s\n' "$_TUI_PROG_RED" "$_TUI_PROG_NC" \
+        "$amount" "$took" "${1:+  ${1}}"
 }
