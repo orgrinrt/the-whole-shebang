@@ -13,7 +13,12 @@
 _finishes() {
     local code="$1" root="${BASH_SOURCE[0]%/*}/.."
     local out; out="$(mktemp)"
-    bash -c "use(){ :; }
+    # The marker is written only if the call succeeded. Written unconditionally
+    # it said "did not hang" and nothing more, so a renamed function, a source
+    # that failed, or plain nonsense passed: the instrument answered the same
+    # whatever it was fed.
+    bash -c "set -e
+             use(){ :; }
              . '${root}/libs/tui/term.sh'
              . '${root}/libs/tui/layout.sh'
              . '${root}/libs/tui/table.sh'

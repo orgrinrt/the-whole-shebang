@@ -299,8 +299,8 @@ it_forgets_the_previous_plan() {
 # the 18% it got wrong was never named.
 #
 # So: a second placer that shares no code with the one under test. Plain shelf
-# packing, which is deliberately weaker — it finds fewer arrangements than
-# optimal — so anything it places that the real one drops is a real loss and
+# packing, which is deliberately weaker: it finds fewer arrangements than
+# optimal, so anything it places that the real one drops is a real loss and
 # not an artefact of a cleverer comparison.
 
 # Shelves: fill a row left to right, drop to the next when the row is full.
@@ -640,4 +640,55 @@ it_never_places_a_panel_inside_the_region_it_reports() {
         done
     done
     assert_empty "$bad"
+}
+
+#[test]
+it_refuses_a_shape_with_no_x_in_it() {
+    # `30` split into `30` and `30`, so a typo for `30x8` became a 30x30 panel:
+    # a size nobody declared, which is the one thing the model promises never
+    # to place. The existing malformed-shape test fed the word `nonsense`,
+    # which was already rejected, and missed the one that was accepted.
+    tui_plan_reset 100 40
+    tui_plan_main 20 10
+    tui_plan_panel a 1 30
+    tui_plan_solve
+    assert_fails tui_plan_has a
+    assert_eq "$TUI_PLAN_DROPPED" "1"
+}
+
+#[test]
+it_still_takes_a_shape_that_does_have_its_x() {
+    # The control: requiring the `x` must not reject a real shape.
+    tui_plan_reset 100 40
+    tui_plan_main 20 10
+    tui_plan_panel a 1 30x8
+    tui_plan_solve
+    assert_ok tui_plan_has a
+    assert_eq "$(tui_plan_w a)" "30"
+}
+
+#[test]
+it_refuses_a_shape_with_a_zero_in_it() {
+    # `tui_plan_has` wanted both dimensions positive while the drop count only
+    # looked at the width, so a `30x0` panel was placed and absent at once.
+    tui_plan_reset 100 40
+    tui_plan_main 20 10
+    tui_plan_panel a 1 30x0
+    tui_plan_panel b 2 0x8
+    tui_plan_solve
+    assert_fails tui_plan_has a
+    assert_fails tui_plan_has b
+    assert_eq "$TUI_PLAN_DROPPED" "2"
+}
+
+#[test]
+it_takes_the_shapes_that_are_shapes_and_leaves_the_rest() {
+    # Mixed, because a panel that names one bad shape among good ones should
+    # keep the good ones rather than losing the panel.
+    tui_plan_reset 100 40
+    tui_plan_main 20 10
+    tui_plan_panel a 1 30 40x6 0x0
+    tui_plan_solve
+    assert_ok tui_plan_has a
+    assert_eq "$(tui_plan_shape a)" "40x6"
 }

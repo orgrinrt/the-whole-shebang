@@ -325,3 +325,18 @@ it_takes_a_head_of_nothing_without_inventing_one() {
     local out; out="$(tui_table_render --width 40 | _strip)"
     assert_contains "$out" "x"
 }
+
+#[test]
+it_has_a_watchdog_that_fails_on_a_real_hang() {
+    # The control for the four tests above. An instrument whose answer is fixed
+    # regardless of the data produces a number and proves nothing.
+    assert_fails _finishes 'while :; do :; done'
+}
+
+#[test]
+it_has_a_watchdog_that_fails_on_a_call_that_never_ran() {
+    # The other direction, and the one that was broken: the marker used to be
+    # written whatever happened, so a renamed function passed as "did not hang".
+    assert_fails _finishes 'zzz_no_such_function'
+    assert_ok    _finishes 'tui_table_reset'
+}

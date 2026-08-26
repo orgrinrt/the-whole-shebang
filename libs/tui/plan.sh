@@ -137,7 +137,8 @@ tui_plan_panel() {
     TUI_PLAN_PRIO+=("$prio")
     # Sorted here, once, rather than in the search where the same list was
     # re-sorted through a pipe at every node it was reached from.
-    TUI_PLAN_SHAPES+=("$(_plan_sort_shapes "$@")")
+    _plan_sort_shapes "$@"
+    TUI_PLAN_SHAPES+=("$_PLAN_SORTED")
     TUI_PLAN_R+=(0); TUI_PLAN_C+=(0); TUI_PLAN_W+=(0); TUI_PLAN_H+=(0)
 }
 
@@ -155,8 +156,16 @@ _plan_sort_shapes() {
     local -a shapes=() areas=()
     local shape w h i j n=0
     for shape in "$@"; do
+        # The `x` has to be there. Without the test, `30` splits into `30` and
+        # `30` and a typo for `30x8` becomes a 30x30 panel: a size nobody
+        # declared, which is the one thing this promises never to place.
+        [[ "$shape" == *x* ]] || continue
         w="${shape%%x*}"; h="${shape##*x}"
         [[ "$w" =~ ^[0-9]+$ && "$h" =~ ^[0-9]+$ ]] || continue
+        # A zero in either dimension is not a panel. `tui_plan_has` already
+        # says no to one, while the drop count said it was placed, so the same
+        # panel was both.
+        (( w > 0 && h > 0 )) || continue
         shapes+=("$shape"); areas+=($(( w * h ))); n=$(( n + 1 ))
     done
     # Insertion sort, descending by area. n is single digits.
@@ -172,9 +181,15 @@ _plan_sort_shapes() {
     # Joined under a stated IFS. `"${a[*]}"` uses whatever the caller's IFS
     # happens to be, and the split on the way back out used it too, so the two
     # cancelled by luck and stopped cancelling the moment a caller set IFS.
+    #
+    # Answered into a global rather than printed, because a command
+    # substitution is a fork and this runs once per panel: ten panels was ten
+    # forks per rebuild, in the file whose header is about having taken the
+    # forks out of the redraw.
     local IFS=' '
-    printf '%s' "${shapes[*]}"
+    _PLAN_SORTED="${shapes[*]}"
 }
+declare -g _PLAN_SORTED=""
 
 # The shapes a panel declared, as an array, split on spaces and nothing else.
 _plan_shapes_of() {
@@ -238,34 +253,28 @@ declare -gi _PLAN_FIT_TOP=0 _PLAN_FIT_X=0 _PLAN_FIT_LINEH=0 _PLAN_FIT_NEXTX=0
 
 # How many of these panels a greedy pass would place from here. Places nothing:
 # this is the lookahead asking what a choice costs the ones after it. Answers
-# into _PLAN_WOULD, with the leftovers in _PLAN_WOULD_LEFT.
+# into _PLAN_WOULD.
 _plan_would_place() {
     local top="$1" left="$2" width="$3" height="$4"
     local line_top="$5" line_h="$6" x="$7"; shift 7
     local -a rest=("$@")
-    local count=0 idx shape placed
-    local -a left_over=()
+    local count=0 idx shape
 
     for idx in ${rest[@]+"${rest[@]}"}; do
-        placed=0
         _plan_shapes_of "$idx"
         for shape in ${_PLAN_SHAPES_OUT[@]+"${_PLAN_SHAPES_OUT[@]}"}; do
             if _plan_fit "$top" "$left" "$width" "$height" \
                          "$line_top" "$line_h" "$x" "${shape%%x*}" "${shape##*x}"; then
                 line_top="$_PLAN_FIT_TOP"; line_h="$_PLAN_FIT_LINEH"; x="$_PLAN_FIT_NEXTX"
-                count=$(( count + 1 )); placed=1
+                count=$(( count + 1 ))
                 break
             fi
         done
-        (( placed == 0 )) && left_over+=("$idx")
     done
-
-    _PLAN_WOULD_LEFT=(${left_over[@]+"${left_over[@]}"})
 
     _PLAN_WOULD="$count"
 }
 declare -gi _PLAN_WOULD=0
-declare -ga _PLAN_WOULD_LEFT=()
 
 # One pass, in order, with one step of lookahead per panel.
 #
