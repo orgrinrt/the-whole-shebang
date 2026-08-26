@@ -268,3 +268,87 @@ it_takes_the_terminals_own_size_when_given_none() {
     tui_layout_solve
     assert_eq "$(tui_layout_size body)" "41"
 }
+
+# --- floors that do not fit together -------------------------------------------
+#
+# A share raised to its floor has to take that room from the other shares. It
+# used to be raised on its own, so the regions added up to more than the screen
+# and the last one was drawn over the edge.
+
+#[test]
+it_never_places_more_than_the_screen_holds() {
+    local t
+    # From 46 up, which is where the list's own floor stops being the binding
+    # constraint. Below that nothing may be dropped and the overflow is the
+    # honest answer, which the test below covers.
+    for t in 46 60 72 78 80 100 140 200; do
+        tui_layout_reset cols "$t"
+        tui_layout_add list 1fr min:46
+        tui_layout_add gap  2  --priority 9
+        tui_layout_add side 30 min:24 --priority 4
+        tui_layout_solve
+        assert_ok test "$(_sum)" -le "$t"
+    done
+}
+
+#[test]
+it_keeps_a_floored_share_at_its_floor() {
+    tui_layout_reset cols 78
+    tui_layout_add list 1fr min:46
+    tui_layout_add side 30 --priority 4
+    tui_layout_solve
+    # The share takes everything the panel left, which is more than its floor.
+    # A floor is the point below which it would be dropped, not a target.
+    assert_eq "$(tui_layout_size list)" "48"
+    assert_eq "$(tui_layout_size side)" "30"
+    assert_eq "$(_sum)" "78"
+}
+
+#[test]
+it_drops_the_droppable_rather_than_starving_the_floor() {
+    tui_layout_reset cols 60
+    tui_layout_add list 1fr min:46
+    tui_layout_add side 30 --priority 4
+    tui_layout_solve
+    # 46 and 30 do not both fit in 60. The list said 46 is its floor and cannot
+    # be dropped, so the panel goes.
+    assert_fails tui_layout_has side
+    assert_eq "$(tui_layout_size list)" "60"
+}
+
+#[test]
+it_drops_in_priority_order_across_a_resolve() {
+    tui_layout_reset cols 72
+    tui_layout_add list 1fr min:46
+    tui_layout_add gap  2  --priority 9
+    tui_layout_add side 30 min:24 --priority 4
+    tui_layout_solve
+    # The gap is the most droppable, and dropping it is not enough, so the
+    # panel follows. Dropping one changes what the shares get, so the whole
+    # thing is worked out again rather than patched.
+    assert_fails tui_layout_has gap
+    assert_fails tui_layout_has side
+    assert_eq "$(tui_layout_size list)" "72"
+}
+
+#[test]
+it_gives_a_share_with_no_floor_at_least_something() {
+    tui_layout_reset cols 10
+    tui_layout_add a 1fr
+    tui_layout_add b 1fr
+    tui_layout_solve
+    assert_ok test "$(tui_layout_size a)" -ge 1
+    assert_ok test "$(tui_layout_size b)" -ge 1
+}
+
+#[test]
+it_reports_the_overflow_rather_than_hiding_it() {
+    tui_layout_reset cols 20
+    tui_layout_add a 30
+    tui_layout_add b 30
+    tui_layout_solve
+    # Neither may be dropped and neither fits. They keep their sizes, and a
+    # caller adding them up can see it; silently shrinking them to something
+    # that fits would be a layout lying about what it placed.
+    assert_ok test "$(_sum)" -gt 20
+}

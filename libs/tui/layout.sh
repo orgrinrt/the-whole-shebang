@@ -51,6 +51,7 @@ declare -ga TUI_LAYOUT_SIZE=()      # solved
 declare -ga TUI_LAYOUT_START=()     # solved, 1-based
 declare -g  TUI_LAYOUT_AXIS="rows"
 declare -gi TUI_LAYOUT_TOTAL=0
+declare -ga _TUI_LAYOUT_KEEP=()
 
 #[pub]
 # Start a layout along `rows` or `cols`, over a total. The total defaults to
@@ -110,12 +111,91 @@ _tui_layout_share() {
     printf '0'
 }
 
-# The floor a region will not go below: its min, or its fixed size.
+# The smallest this region can usefully be. A fixed region is its size; a share
+# is its floor, or one column if it named none.
 _tui_layout_floor() {
-    local i="$1" f
+    local i="$1" f s
     f="$(_tui_layout_fixed "${TUI_LAYOUT_WANT[$i]}")"
-    if (( TUI_LAYOUT_MIN[i] > 0 )); then printf '%d' "${TUI_LAYOUT_MIN[$i]}"
-    else printf '%d' "$f"; fi
+    s="$(_tui_layout_share "${TUI_LAYOUT_WANT[$i]}")"
+    if (( s > 0 )); then
+        if (( TUI_LAYOUT_MIN[i] > 0 )); then printf '%d' "${TUI_LAYOUT_MIN[$i]}"
+        else printf '1'; fi
+    else
+        (( f < TUI_LAYOUT_MIN[i] )) && f="${TUI_LAYOUT_MIN[$i]}"
+        printf '%d' "$f"
+    fi
+}
+
+# One attempt, over the regions still being kept. Returns 1 when they do not
+# fit, which is the outer loop's cue to drop one and try again. Sizing and
+# dropping have to be one decision: sized first and dropped after, a floor
+# raised during sizing pushes the total past the screen with nothing left to
+# give it back.
+_tui_layout_attempt() {
+    local n="${#TUI_LAYOUT_NAME[@]}" i
+    local fixed=0 shares=0 f sh
+
+    local -a pinned=()
+    for (( i = 0; i < n; i++ )); do pinned+=(0); TUI_LAYOUT_SIZE[i]=0; done
+
+    for (( i = 0; i < n; i++ )); do
+        (( _TUI_LAYOUT_KEEP[i] == 1 )) || continue
+        f="$(_tui_layout_fixed "${TUI_LAYOUT_WANT[$i]}")"
+        sh="$(_tui_layout_share "${TUI_LAYOUT_WANT[$i]}")"
+        if (( sh > 0 )); then
+            shares=$(( shares + sh ))
+        else
+            (( f < TUI_LAYOUT_MIN[i] )) && f="${TUI_LAYOUT_MIN[$i]}"
+            TUI_LAYOUT_SIZE[i]="$f"; fixed=$(( fixed + f )); pinned[i]=1
+        fi
+    done
+
+    (( fixed > TUI_LAYOUT_TOTAL )) && return 1
+
+    # A share that would land under its floor is pinned there and stops being a
+    # share; what is left divides again among the rest.
+    local guard=0 left per got raised
+    while (( shares > 0 )); do
+        left=$(( TUI_LAYOUT_TOTAL - fixed ))
+        (( left < 0 )) && left=0
+        per=$(( left / shares ))
+        raised=0
+        for (( i = 0; i < n; i++ )); do
+            (( _TUI_LAYOUT_KEEP[i] == 1 && pinned[i] == 0 )) || continue
+            sh="$(_tui_layout_share "${TUI_LAYOUT_WANT[$i]}")"
+            (( sh > 0 )) || continue
+            got=$(( per * sh ))
+            if (( got < TUI_LAYOUT_MIN[i] )); then
+                TUI_LAYOUT_SIZE[i]="${TUI_LAYOUT_MIN[$i]}"
+                fixed=$(( fixed + TUI_LAYOUT_MIN[i] ))
+                shares=$(( shares - sh ))
+                pinned[i]=1; raised=1
+                break
+            fi
+        done
+        (( raised == 0 )) && break
+        (( fixed > TUI_LAYOUT_TOTAL )) && return 1
+        guard=$(( guard + 1 ))
+        (( guard > n + 1 )) && break
+    done
+
+    if (( shares > 0 )); then
+        left=$(( TUI_LAYOUT_TOTAL - fixed ))
+        (( left < 0 )) && left=0
+        per=$(( left / shares ))
+        local extra=$(( left % shares ))
+        for (( i = 0; i < n; i++ )); do
+            (( _TUI_LAYOUT_KEEP[i] == 1 && pinned[i] == 0 )) || continue
+            sh="$(_tui_layout_share "${TUI_LAYOUT_WANT[$i]}")"
+            (( sh > 0 )) || continue
+            got=$(( per * sh ))
+            # The remainder goes to the first share rather than vanishing, so
+            # the regions add up to the total exactly.
+            if (( extra > 0 )); then got=$(( got + extra )); extra=0; fi
+            TUI_LAYOUT_SIZE[i]="$got"
+        done
+    fi
+    return 0
 }
 
 #[pub]
@@ -126,65 +206,37 @@ tui_layout_solve() {
     local n="${#TUI_LAYOUT_NAME[@]}" i
     (( n > 0 )) || return 0
 
-    local -a keep=()
-    for (( i = 0; i < n; i++ )); do keep+=(1); done
+    _TUI_LAYOUT_KEEP=()
+    for (( i = 0; i < n; i++ )); do _TUI_LAYOUT_KEEP+=(1); done
 
-    # Drop the least important until the floors fit. Whole regions, because a
-    # region squeezed under its floor is one that costs space and does not do
-    # its job.
     while :; do
-        local need=0
-        for (( i = 0; i < n; i++ )); do
-            (( keep[i] == 1 )) || continue
-            need=$(( need + $(_tui_layout_floor "$i") ))
-        done
-        (( need <= TUI_LAYOUT_TOTAL )) && break
+        _tui_layout_attempt && break
 
+        # Did not fit. Drop the least important region that may be dropped and
+        # try the whole thing again, because dropping one changes what every
+        # share gets.
         local worst=-1 worst_prio=0
         for (( i = 0; i < n; i++ )); do
-            (( keep[i] == 1 )) || continue
+            (( _TUI_LAYOUT_KEEP[i] == 1 )) || continue
             (( TUI_LAYOUT_PRIO[i] == 0 )) && continue
             if (( TUI_LAYOUT_PRIO[i] > worst_prio )); then
                 worst_prio="${TUI_LAYOUT_PRIO[$i]}"; worst="$i"
             fi
         done
-        # Nothing left that may be dropped. The rest keep their floors and
-        # overflow, which the caller can see by comparing the sizes to the
-        # total; pretending otherwise would just hide it.
-        (( worst < 0 )) && break
-        keep[worst]=0
-    done
-
-    # Fixed sizes first, then the shares divide what is left.
-    local fixed=0 shares=0
-    for (( i = 0; i < n; i++ )); do
-        if (( keep[i] == 0 )); then TUI_LAYOUT_SIZE[i]=0; continue; fi
-        local f s
-        f="$(_tui_layout_fixed "${TUI_LAYOUT_WANT[$i]}")"
-        s="$(_tui_layout_share "${TUI_LAYOUT_WANT[$i]}")"
-        if (( s > 0 )); then shares=$(( shares + s )); TUI_LAYOUT_SIZE[i]=0
-        else
-            (( f < TUI_LAYOUT_MIN[i] )) && f="${TUI_LAYOUT_MIN[$i]}"
-            TUI_LAYOUT_SIZE[i]="$f"; fixed=$(( fixed + f ))
+        if (( worst < 0 )); then
+            # Nothing left that may go. The rest keep their floors and overflow,
+            # which the caller can see by adding the sizes up; pretending
+            # otherwise would only hide it.
+            for (( i = 0; i < n; i++ )); do
+                (( _TUI_LAYOUT_KEEP[i] == 1 )) || continue
+                (( TUI_LAYOUT_SIZE[i] > 0 )) && continue
+                TUI_LAYOUT_SIZE[i]="$(_tui_layout_floor "$i")"
+            done
+            break
         fi
+        _TUI_LAYOUT_KEEP[worst]=0
+        TUI_LAYOUT_SIZE[worst]=0
     done
-
-    local left=$(( TUI_LAYOUT_TOTAL - fixed ))
-    (( left < 0 )) && left=0
-    if (( shares > 0 )); then
-        local per=$(( left / shares )) extra=$(( left % shares ))
-        for (( i = 0; i < n; i++ )); do
-            (( keep[i] == 1 )) || continue
-            local s; s="$(_tui_layout_share "${TUI_LAYOUT_WANT[$i]}")"
-            (( s > 0 )) || continue
-            local got=$(( per * s ))
-            # The remainder goes to the first share rather than vanishing, so
-            # the regions add up to the total exactly.
-            if (( extra > 0 )); then got=$(( got + extra )); extra=0; fi
-            (( got < TUI_LAYOUT_MIN[i] )) && got="${TUI_LAYOUT_MIN[$i]}"
-            TUI_LAYOUT_SIZE[i]="$got"
-        done
-    fi
 
     local at=1
     for (( i = 0; i < n; i++ )); do

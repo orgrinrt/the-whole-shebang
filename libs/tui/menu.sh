@@ -55,6 +55,24 @@ declare -g  TUI_MENU_CHOICE=""
 # filtering needs no special case anywhere: an unfiltered menu is simply one
 # whose view is everything.
 declare -ga TUI_MENU_VIEW=()
+
+# Hide the rows that cannot be run. Off by default: a list that silently omits
+# things reads as a list with things missing, so this is something the reader
+# turns on, and the key line says it is on.
+declare -gi TUI_MENU_HIDE_OFF="${TUI_MENU_HIDE_OFF:-0}"
+
+# What this menu is for, and any longer help, shown by `?` along with the keys.
+declare -g TUI_MENU_ABOUT="${TUI_MENU_ABOUT:-}"
+declare -g TUI_MENU_HELP="${TUI_MENU_HELP:-}"
+
+# Lines for a panel down the right, as "label<tab>value". Shown when the
+# terminal is wide enough to hold one without taking room the list needs, and
+# not shown at all otherwise: a window that is tall and narrow has space below
+# the list and none beside it, and squeezing a panel in there costs the labels
+# their width for nothing.
+declare -ga TUI_MENU_ASIDE=()
+declare -gi TUI_MENU_ASIDE_MIN="${TUI_MENU_ASIDE_MIN:-24}"
+declare -gi TUI_MENU_ASIDE_WIDTH="${TUI_MENU_ASIDE_WIDTH:-30}"
 declare -g  TUI_MENU_FILTER=""
 
 #[pub]
@@ -64,6 +82,7 @@ declare -g  TUI_MENU_FILTER=""
 tui_menu_reset() {
     TUI_MENU_ID=(); TUI_MENU_TEXT=(); TUI_MENU_STATE=(); TUI_MENU_NOTE=()
     TUI_MENU_VIEW=(); TUI_MENU_CHOICE=""; TUI_MENU_FILTER=""
+    TUI_MENU_ASIDE=()
 }
 
 #[pub]
@@ -108,19 +127,32 @@ _tui_menu_match() {
 # A heading survives only when something under it does, so filtering does not
 # leave a screen of section titles with nothing beneath them.
 # Usage: tui_menu_refilter -> rebuilds TUI_MENU_VIEW
+# Whether a row survives the current view: the search phrase, and whether
+# unavailable rows are being shown at all.
+_tui_menu_shown() {
+    local i="$1"
+    _tui_menu_match "$i" "$TUI_MENU_FILTER" || return 1
+    if (( TUI_MENU_HIDE_OFF == 1 )) && [[ "${TUI_MENU_STATE[$i]}" == "off" ]]; then
+        return 1
+    fi
+    return 0
+}
+
 tui_menu_refilter() {
     local n="${#TUI_MENU_ID[@]}" i j keep
     TUI_MENU_VIEW=()
     for (( i = 0; i < n; i++ )); do
         if [[ "${TUI_MENU_STATE[$i]}" == "heading" ]]; then
+            # A heading with nothing under it any more is noise, so it goes
+            # with its rows rather than leaving an empty section behind.
             keep=1
             for (( j = i + 1; j < n; j++ )); do
                 [[ "${TUI_MENU_STATE[$j]}" == "heading" ]] && break
-                if _tui_menu_match "$j" "$TUI_MENU_FILTER"; then keep=0; break; fi
+                if _tui_menu_shown "$j"; then keep=0; break; fi
             done
             (( keep == 0 )) && TUI_MENU_VIEW+=("$i")
         else
-            _tui_menu_match "$i" "$TUI_MENU_FILTER" && TUI_MENU_VIEW+=("$i")
+            _tui_menu_shown "$i" && TUI_MENU_VIEW+=("$i")
         fi
     done
 }
@@ -249,6 +281,107 @@ _tui_menu_rule_char() {
     fi
 }
 
+#[pub]
+# Add a line to the panel on the right: something true about the machine that
+# is worth knowing while choosing, rather than after choosing wrongly.
+# Usage: tui_menu_aside <label> <value>
+tui_menu_aside() {
+    TUI_MENU_ASIDE+=("${1}"$'\t'"${2:-}")
+}
+
+# How wide the panel gets, or 0 when there is no room for one. The list keeps
+# what it needs first; the panel takes what is genuinely spare.
+_tui_menu_aside_width() {
+    (( ${#TUI_MENU_ASIDE[@]} > 0 )) || { printf '0'; return 0; }
+    declare -F tui_layout_reset >/dev/null 2>&1 || { printf '0'; return 0; }
+
+    tui_layout_reset cols "${TUI_COLS:-80}"
+    tui_layout_add list 1fr min:46
+    tui_layout_add gap  2 --priority 9
+    # A width, not a share. A panel that grows with the window ends up mostly
+    # blank on a wide one while the list it took the room from wraps.
+    tui_layout_add side "$TUI_MENU_ASIDE_WIDTH" min:"$TUI_MENU_ASIDE_MIN" --priority 4
+    tui_layout_solve
+    tui_layout_has side || { printf '0'; return 0; }
+    tui_layout_size side
+}
+
+# The panel itself, down the right, starting on the same row as the list.
+_tui_menu_render_aside() {
+    local width="$1" top_row="$2"
+    (( width > 0 )) || return 0
+    local left=$(( ${TUI_COLS:-80} - width + 1 ))
+    (( left < 1 )) && return 0
+
+    local row="$top_row" line label value shown
+    for line in ${TUI_MENU_ASIDE[@]+"${TUI_MENU_ASIDE[@]}"}; do
+        (( row >= TUI_ROWS - 5 )) && break
+        IFS=$'\t' read -r label value <<< "$line"
+        tui_move "$row" "$left"
+        if [[ -z "$value" ]]; then
+            # A label on its own is a heading for the group under it.
+            printf '%s%s%s' "$TUI_C_HEAD" "$label" "$TUI_C_END"
+        else
+            shown="$label"
+            (( ${#shown} > width - 2 )) && shown="${shown:0:$(( width - 2 ))}"
+            printf '%s%s%s' "$TUI_C_MUTE" "$shown" "$TUI_C_END"
+            local vrow=$(( ${#shown} ))
+            tui_move "$row" $(( left + width - ${#value} ))
+            (( ${#value} < width )) && printf '%s' "$value"
+        fi
+        row=$(( row + 1 ))
+    done
+}
+
+#[pub]
+# The keys this menu answers to, as "key<tab>what it does" lines. Public so a
+# caller can show them somewhere of its own, and so `?` has one source rather
+# than a second list that drifts from the first.
+# Usage: tui_menu_keys
+tui_menu_keys() {
+    printf '%s\n' \
+        $'up down\tmove' \
+        $'enter\tchoose' \
+        $'/\tsearch' \
+        $'a\tshow or hide what cannot be run' \
+        $'?\tthis' \
+        $'q\tback'
+}
+
+# The help screen. Everything the interface can say about itself, in one place
+# reached by one key, rather than spread between a key line, a manual and a
+# --help nobody can reach from in here.
+_tui_menu_help() {
+    local title="$1" line key what
+    tui_clear
+    local row=1
+    tui_move $row 1; printf '%s%s%s' "$TUI_C_HEAD" "$title" "$TUI_C_END"; row=$(( row + 2 ))
+
+    if [[ -n "$TUI_MENU_ABOUT" ]]; then
+        tui_move $row 1; printf '%s' "$TUI_MENU_ABOUT"; row=$(( row + 2 ))
+    fi
+
+    tui_move $row 1; printf '%sKeys%s' "$TUI_C_HEAD" "$TUI_C_END"; row=$(( row + 2 ))
+    while IFS=$'\t' read -r key what; do
+        [[ -n "$key" ]] || continue
+        tui_move $row 1
+        printf '  %s%-12s%s %s' "$TUI_C_KEY" "$key" "$TUI_C_END" "$what"
+        row=$(( row + 1 ))
+    done < <(tui_menu_keys)
+
+    if [[ -n "$TUI_MENU_HELP" ]]; then
+        row=$(( row + 1 ))
+        while IFS= read -r line; do
+            (( row >= TUI_ROWS - 1 )) && break
+            tui_move $row 1; printf '%s' "$line"; row=$(( row + 1 ))
+        done <<< "$TUI_MENU_HELP"
+    fi
+
+    tui_move "$TUI_ROWS" 1
+    printf '%sany key to go back%s' "$TUI_C_MUTE" "$TUI_C_END"
+    tui_key_read || true
+}
+
 # The whole screen. Redrawn on every key, which at this size is cheaper than
 # tracking what changed and getting it wrong.
 _tui_menu_render() {
@@ -264,12 +397,22 @@ _tui_menu_render() {
         printf '%snothing matches %s%s' "$TUI_C_WARN" "\"${TUI_MENU_FILTER}\"" "$TUI_C_END"
     fi
 
+    # The panel first, so the list knows how much width is left to cut its
+    # labels to.
+    local aside_w; aside_w="$(_tui_menu_aside_width)"
+    local list_cols="${TUI_COLS:-80}"
+    (( aside_w > 0 )) && list_cols=$(( list_cols - aside_w - 2 ))
+    _tui_menu_render_aside "$aside_w" 3
+
+    local saved_cols="$TUI_COLS"
+    TUI_COLS="$list_cols"
     for (( i = top; i < top + height && i < n; i++ )); do
         raw="${TUI_MENU_VIEW[$i]:-$i}"
         tui_move $row 1
         if (( i == cursor )); then _tui_menu_row "$raw" 1; else _tui_menu_row "$raw" 0; fi
         row=$(( row + 1 ))
     done
+    TUI_COLS="$saved_cols"
 
     # The note for whatever is under the cursor. Set apart by a rule and given
     # the label's own emphasis rather than dimmed into the background: dimmed
@@ -300,7 +443,9 @@ _tui_menu_render() {
     if (( ${_TUI_MENU_FILTERING:-0} == 1 )); then
         printf '%s%s%s' "$TUI_C_MUTE" "typing to narrow   backspace   esc clears   enter choose" "$TUI_C_END"
     else
-        printf '%s%s%s' "$DIM" "up/down move   enter choose   / search   q back" "$NC"
+        local hint="up/down move   enter choose   / search   ? keys   q back"
+        (( TUI_MENU_HIDE_OFF == 1 )) && hint="${hint}   ${TUI_C_KEY}a${TUI_C_END}${TUI_C_MUTE} hiding what cannot run"
+        printf '%s%s%s' "$TUI_C_MUTE" "$hint" "$TUI_C_END"
     fi
 }
 
@@ -343,6 +488,23 @@ tui_menu_run() {
         if (( filtering == 0 )); then
             if [[ "$TUI_KEY" == "/" ]]; then
                 filtering=1; continue
+            fi
+            if [[ "$TUI_KEY" == "?" ]]; then
+                _tui_menu_help "$title"; continue
+            fi
+            if [[ "$TUI_KEY" == "a" ]]; then
+                TUI_MENU_HIDE_OFF=$(( 1 - TUI_MENU_HIDE_OFF ))
+                tui_menu_refilter
+                cursor="$(_tui_menu_first)"; top=0
+                # Everything may have gone: a set where nothing can run, with
+                # the unavailable hidden, is an empty list. Turn it back rather
+                # than leaving a blank screen with no way out but q.
+                if ! _tui_menu_landable "$cursor"; then
+                    TUI_MENU_HIDE_OFF=$(( 1 - TUI_MENU_HIDE_OFF ))
+                    tui_menu_refilter
+                    cursor="$(_tui_menu_first)"
+                fi
+                continue
             fi
             if tui_key_is_accept; then
                 (( $(_tui_menu_len) > 0 )) || continue
