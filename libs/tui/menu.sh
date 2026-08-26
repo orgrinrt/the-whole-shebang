@@ -181,15 +181,111 @@ _tui_menu_len() {
     else printf '%d' "${#TUI_MENU_ID[@]}"; fi
 }
 
-# The next index the cursor may rest on, moving by <step>. Stops at the ends
-# rather than wrapping: in a list where the first rows are headings, wrapping
-# sends the cursor somewhere the user did not ask for.
+# The next index the cursor may rest on, moving by <step>, wrapping at the ends.
+#
+# Wrapping, because a list is a ring: down from the last row is the first, and
+# up from the first is the last. Stopping dead at the ends means the way to the
+# bottom of a long list is to hold a key down, and it makes the top and the
+# bottom feel like walls rather than like the same place.
+#
+# A step larger than one is a page, and a page does not wrap: paging past the
+# end lands on the end, which is what every list with a page key does.
 _tui_menu_step() {
-    local from="$1" step="$2" n i; n="$(_tui_menu_len)"
-    i=$(( from + step ))
-    while (( i >= 0 && i < n )); do
+    local from="$1" step="$2" n i tries; n="$(_tui_menu_len)"
+    (( n > 0 )) || { printf '%d' "$from"; return 0; }
+
+    if (( step > 1 || step < -1 )); then
+        i=$(( from + step ))
+        (( i < 0 )) && i=0
+        (( i >= n )) && i=$(( n - 1 ))
+        # Onto something landable, searching towards where the page came from
+        # so a page never lands on a heading.
+        local back=$(( step > 0 ? -1 : 1 ))
+        while (( i >= 0 && i < n )); do
+            _tui_menu_landable "$i" && { printf '%d' "$i"; return 0; }
+            i=$(( i + back ))
+        done
+        printf '%d' "$from"
+        return 0
+    fi
+
+    # One step, wrapping. Bounded by the length so a list with nothing landable
+    # in it ends rather than spinning.
+    i="$from"
+    for (( tries = 0; tries < n; tries++ )); do
+        i=$(( (i + step + n) % n ))
         _tui_menu_landable "$i" && { printf '%d' "$i"; return 0; }
-        i=$(( i + step ))
+    done
+    printf '%d' "$from"
+}
+
+# The top of a section, moving by <step>, wrapping.
+#
+# What a modifier with an arrow does: a long list is read by section, and
+# stepping past twenty rows to reach the next heading is not reading.
+#
+# Down goes to the top of the next section. Up goes to the top of this one, and
+# to the top of the previous one when the cursor is already there, which is
+# what every editor's paragraph movement does and what a reader expects from a
+# key that means "back a section".
+_tui_menu_section_step() {
+    local from="$1" step="$2" n; n="$(_tui_menu_len)"
+    (( n > 0 )) || { printf '%d' "$from"; return 0; }
+
+    if (( step > 0 )); then
+        printf '%d' "$(_tui_menu_section_top "$(_tui_menu_next_heading "$from" 1)")"
+        return 0
+    fi
+
+    local here; here="$(_tui_menu_section_top "$from")"
+    if [[ "$here" != "$from" ]]; then
+        printf '%d' "$here"
+        return 0
+    fi
+    # Already at the top, so the one before it: back past this section's own
+    # heading, then back to the heading before that.
+    local h; h="$(_tui_menu_next_heading "$from" -1)"
+    printf '%d' "$(_tui_menu_section_top "$(_tui_menu_next_heading "$h" -1)")"
+}
+
+# The nearest heading from <from>, moving by <step>, wrapping. <from> itself is
+# never the answer.
+_tui_menu_next_heading() {
+    local from="$1" step="$2" n i tries raw; n="$(_tui_menu_len)"
+    i="$from"
+    for (( tries = 0; tries < n; tries++ )); do
+        i=$(( (i + step + n) % n ))
+        raw="${TUI_MENU_VIEW[$i]:-$i}"
+        [[ "${TUI_MENU_STATE[$raw]:-}" == "heading" ]] && { printf '%d' "$i"; return 0; }
+    done
+    printf '%d' "$from"
+}
+
+# The first row of the section <from> is in. Given a heading, that heading's
+# first row; given a row, the first row under the heading above it.
+#
+# Not "the first landable at or after <from>", which is <from> itself for any
+# row and makes "back to the top of this section" a move that never happens.
+_tui_menu_section_top() {
+    local from="$1" n i tries raw; n="$(_tui_menu_len)"
+    (( n > 0 )) || { printf '%d' "$from"; return 0; }
+
+    # Back to the heading at or above it. A list with no headings at all has no
+    # sections, so the top of the only one is the first landable row.
+    i="$from"
+    local head=-1
+    for (( tries = 0; tries < n; tries++ )); do
+        raw="${TUI_MENU_VIEW[$i]:-$i}"
+        [[ "${TUI_MENU_STATE[$raw]:-}" == "heading" ]] && { head="$i"; break; }
+        (( i == 0 )) && break
+        i=$(( i - 1 ))
+    done
+    (( head < 0 )) && { printf '%d' "$(_tui_menu_first)"; return 0; }
+
+    i="$head"
+    for (( tries = 0; tries < n; tries++ )); do
+        i=$(( (i + 1) % n ))
+        _tui_menu_landable "$i" && { printf '%d' "$i"; return 0; }
     done
     printf '%d' "$from"
 }
@@ -344,9 +440,12 @@ _tui_menu_render_aside() {
 # Usage: tui_menu_keys
 tui_menu_keys() {
     printf '%s\n' \
-        $'up down\tmove' \
+        $'up down\tmove, wrapping at either end' \
+        $'[ ]\tby section, or a modifier with up and down' \
+        $'home end\tfirst and last' \
+        $'pgup pgdn\tby a screen' \
         $'enter\tchoose' \
-        $'/\tsearch' \
+        $'/\tsearch the name, the id and the note' \
         $'a\tshow or hide what cannot be run' \
         $'?\tthis' \
         $'q\tback'
@@ -447,7 +546,7 @@ _tui_menu_render() {
     if (( ${_TUI_MENU_FILTERING:-0} == 1 )); then
         printf '%s%s%s' "$TUI_C_MUTE" "typing to narrow   backspace   esc clears   enter choose" "$TUI_C_END"
     else
-        local hint="up/down move   enter choose   / search   ? keys   q back"
+        local hint="up/down move   [ ] section   enter choose   / search   ? keys   q back"
         (( TUI_MENU_HIDE_OFF == 1 )) && hint="${hint}   ${TUI_C_KEY}a${TUI_C_END}${TUI_C_MUTE} hiding what cannot run"
         printf '%s%s%s' "$TUI_C_MUTE" "$hint" "$TUI_C_END"
     fi
@@ -562,8 +661,15 @@ tui_menu_run() {
             up)   cursor="$(_tui_menu_step "$cursor" -1)" ;;
             down) cursor="$(_tui_menu_step "$cursor"  1)" ;;
             home) cursor="$(_tui_menu_first)"             ;;
+            end)  cursor="$(_tui_menu_step "$(_tui_menu_first)" -1)" ;;
             pgup) cursor="$(_tui_menu_step "$cursor" -"$height")" ;;
             pgdn) cursor="$(_tui_menu_step "$cursor"  "$height")" ;;
+            # A modifier with an arrow moves by section. Which modifier is
+            # whatever the terminal sends, since a console that sends none of
+            # them is exactly the console this has to work in, and `[` and `]`
+            # are the fallback that always arrives.
+            *-up|'[')   cursor="$(_tui_menu_section_step "$cursor" -1)" ;;
+            *-down|']') cursor="$(_tui_menu_section_step "$cursor"  1)" ;;
         esac
     done
     tui_raw_off

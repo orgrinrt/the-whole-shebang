@@ -95,19 +95,24 @@ it_steps_over_a_heading() {
 }
 
 #[test]
-it_stops_at_the_end_rather_than_wrapping() {
-    # Wrapping in a list whose first rows are headings throws the cursor
-    # somewhere nobody asked for.
+it_wraps_at_either_end_rather_than_stopping() {
+    # A list is a ring. Stopping dead means the way to the bottom of a long
+    # list is to hold a key down, and it makes the two ends feel like walls
+    # rather than like the same place. The headings at either end are skipped
+    # on the way round, so the cursor still lands somewhere it can rest.
     fixture
-    assert_eq "$(_tui_menu_step 6 1)" "6"
-    assert_eq "$(_tui_menu_step 1 -1)" "1"
+    assert_eq "$(_tui_menu_step 6 1)" "1"
+    assert_eq "$(_tui_menu_step 1 -1)" "6"
 }
 
 #[test]
-it_clamps_a_step_larger_than_the_list() {
+it_clamps_a_page_larger_than_the_list() {
+    # A page does not wrap: paging past the end lands on the end, which is what
+    # every list with a page key does, and a page that wrapped would lose the
+    # reader's place entirely.
     fixture
-    assert_eq "$(_tui_menu_step 1 99)"  "1"
-    assert_eq "$(_tui_menu_step 6 -99)" "6"
+    assert_eq "$(_tui_menu_step 1 99)"  "6"
+    assert_eq "$(_tui_menu_step 6 -99)" "1"
 }
 
 #[test]
@@ -523,4 +528,159 @@ it_still_finds_a_row_by_its_label_and_its_note() {
     TUI_MENU_FILTER="network"; tui_menu_refilter
     assert_eq "${#TUI_MENU_VIEW[@]}" "2"
     TUI_MENU_FILTER=""
+}
+
+# --- the cursor is a ring ----------------------------------------------------
+#
+# Stopping dead at the ends means the way to the bottom of a long list is to
+# hold a key down, and it makes the top and the bottom feel like walls rather
+# than like the same place.
+
+_menu_two_sections() {
+    tui_menu_reset
+    tui_menu_heading a
+    tui_menu_entry one   One   ok ""
+    tui_menu_entry two   Two   ok ""
+    tui_menu_heading b
+    tui_menu_entry three Three ok ""
+    tui_menu_entry four  Four  ok ""
+    tui_menu_refilter
+}
+
+#[test]
+it_wraps_from_the_first_row_to_the_last() {
+    _menu_two_sections
+    assert_eq "$(_tui_menu_step 1 -1)" "5"
+}
+
+#[test]
+it_wraps_from_the_last_row_to_the_first() {
+    _menu_two_sections
+    assert_eq "$(_tui_menu_step 5 1)" "1"
+}
+
+#[test]
+it_skips_a_heading_on_the_way_round() {
+    # Wrapping must not land on a heading, which is not landable, and the
+    # heading is exactly what sits at either end of the ring.
+    _menu_two_sections
+    assert_eq "$(_tui_menu_step 2 1)" "4"
+    assert_eq "$(_tui_menu_step 4 -1)" "2"
+}
+
+#[test]
+it_stays_put_when_nothing_is_landable() {
+    # A list of nothing but headings has no ring to go round, and a wrap that
+    # searches forever is a hang.
+    tui_menu_reset
+    tui_menu_heading a
+    tui_menu_heading b
+    tui_menu_refilter
+    assert_eq "$(_tui_menu_step 0 1)" "0"
+    assert_eq "$(_tui_menu_step 0 -1)" "0"
+}
+
+#[test]
+it_does_not_wrap_a_page() {
+    # Paging past the end lands on the end, which is what every list with a
+    # page key does. A page that wrapped would lose the reader's place.
+    _menu_two_sections
+    assert_eq "$(_tui_menu_step 1 10)" "5"
+    assert_eq "$(_tui_menu_step 5 -10)" "1"
+}
+
+#[test]
+it_never_lands_a_page_on_a_heading() {
+    _menu_two_sections
+    local i
+    for i in 1 2 4 5; do
+        assert_ok _tui_menu_landable "$(_tui_menu_step "$i" 3)"
+        assert_ok _tui_menu_landable "$(_tui_menu_step "$i" -3)"
+    done
+}
+
+# --- moving by section -------------------------------------------------------
+
+#[test]
+it_moves_down_to_the_top_of_the_next_section() {
+    _menu_two_sections
+    assert_eq "$(_tui_menu_section_step 1 1)" "4"
+    assert_eq "$(_tui_menu_section_step 2 1)" "4"
+}
+
+#[test]
+it_moves_up_to_the_top_of_this_section_first() {
+    # What every editor's paragraph movement does, and what a reader expects
+    # from a key that means back a section.
+    _menu_two_sections
+    assert_eq "$(_tui_menu_section_step 2 -1)" "1"
+    assert_eq "$(_tui_menu_section_step 5 -1)" "4"
+}
+
+#[test]
+it_moves_up_to_the_previous_section_when_already_at_the_top() {
+    _menu_two_sections
+    assert_eq "$(_tui_menu_section_step 4 -1)" "1"
+}
+
+#[test]
+it_wraps_by_section_too() {
+    _menu_two_sections
+    assert_eq "$(_tui_menu_section_step 4 1)" "1"
+    assert_eq "$(_tui_menu_section_step 1 -1)" "4"
+}
+
+#[test]
+it_stays_put_moving_by_section_in_a_list_with_none() {
+    tui_menu_reset
+    tui_menu_entry x X ok ""
+    tui_menu_entry y Y ok ""
+    tui_menu_refilter
+    assert_eq "$(_tui_menu_section_step 0 1)" "0"
+    assert_eq "$(_tui_menu_section_step 0 -1)" "0"
+}
+
+#[test]
+it_moves_by_section_over_the_filtered_view() {
+    # The view is what the reader sees, so section movement has to be over it
+    # and not over the rows underneath.
+    _menu_two_sections
+    TUI_MENU_FILTER="Th"
+    tui_menu_refilter
+    local first; first="$(_tui_menu_first)"
+    assert_eq "$(_tui_menu_section_step "$first" 1)" "$first"
+    TUI_MENU_FILTER=""
+    tui_menu_refilter
+}
+
+# --- what the terminal sends -------------------------------------------------
+
+#[test]
+it_names_a_modified_arrow() {
+    assert_eq "$(_tui_key_from_csi '1;2A')" "shift-up"
+    assert_eq "$(_tui_key_from_csi '1;5B')" "ctrl-down"
+    assert_eq "$(_tui_key_from_csi '1;3C')" "alt-right"
+}
+
+#[test]
+it_still_names_a_plain_arrow() {
+    assert_eq "$(_tui_key_from_csi 'A')" "up"
+    assert_eq "$(_tui_key_from_csi 'B')" "down"
+}
+
+#[test]
+it_reads_a_modifier_it_does_not_know_as_the_arrow_itself() {
+    # A key nobody named should move the cursor rather than do nothing.
+    assert_eq "$(_tui_key_from_csi '1;9A')" "up"
+}
+
+#[test]
+it_does_not_fold_a_modified_arrow_into_plain_motion() {
+    # `tui_key_motion` folds the arrows and the vi keys together. A modified
+    # one has to come out the other side intact or the menu cannot tell it
+    # from the plain one.
+    TUI_KEY="ctrl-down"
+    assert_eq "$(tui_key_motion)" "ctrl-down"
+    TUI_KEY="down"
+    assert_eq "$(tui_key_motion)" "down"
 }

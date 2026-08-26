@@ -57,7 +57,33 @@ declare -g TUI_ESC_TIMEOUT="${TUI_ESC_TIMEOUT:-0.05}"
 
 # Kept as a pure function of the bytes so it can be tested without a terminal.
 # The reader below does the waiting; this only decides what the bytes meant.
+# A modified arrow arrives as `1;<m><letter>`: `1;2A` is shift-up, `1;5A` is
+# ctrl-up. The modifier is a bitmask over 1, so 2 is shift, 3 alt, 5 ctrl, and
+# the combinations add. Named rather than passed through, so nothing above here
+# matches an escape sequence.
+_tui_key_modifier() {
+    case "$1" in
+        2) printf 'shift-' ;; 3) printf 'alt-'   ;; 4) printf 'alt-shift-' ;;
+        5) printf 'ctrl-' ;;  6) printf 'ctrl-shift-' ;; 7) printf 'ctrl-alt-' ;;
+        8) printf 'ctrl-alt-shift-' ;;
+        *) printf '' ;;
+    esac
+}
+
 _tui_key_from_csi() {
+    # `1;5A` and friends, before the plain letters, since the letter is the
+    # same and only the parameters tell them apart.
+    if [[ "$1" =~ ^1\;([0-9]+)([A-D])$ ]]; then
+        local mod name
+        mod="$(_tui_key_modifier "${BASH_REMATCH[1]}")"
+        case "${BASH_REMATCH[2]}" in
+            A) name=up ;; B) name=down ;; C) name=right ;; D) name=left ;;
+        esac
+        # An unknown modifier is still that arrow. A key nobody named should
+        # move the cursor rather than do nothing.
+        printf '%s%s' "$mod" "$name"
+        return 0
+    fi
     case "$1" in
         A)       printf 'up'        ;;
         B)       printf 'down'      ;;
