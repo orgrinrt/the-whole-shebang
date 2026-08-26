@@ -19,8 +19,8 @@
 # knows what was there.
 #
 # Usage:
-#   use shebang::tui/term
-#   use shebang::tui/modal
+#   use shebang::tui::term
+#   use shebang::tui::modal
 #
 #   tui_modal_open "Wipe this disk" "/dev/sdb" "20 GiB, removable"
 #   tui_modal_prompt "Type the name back to continue: "   # reads a line

@@ -35,7 +35,7 @@
 # to call for that.
 #
 # Usage:
-#   use shebang::tui/confirm
+#   use shebang::tui::confirm
 #
 #   tui_confirm "Reinstall the bootloader?"          || return
 #   tui_confirm_typed "Wipe /dev/sdb?" ERASE         || return

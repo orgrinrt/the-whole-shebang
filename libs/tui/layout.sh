@@ -23,8 +23,8 @@
 #   min:8    never smaller than eight, and dropped rather than made smaller
 #
 # Usage:
-#   use shebang::tui/term
-#   use shebang::tui/layout
+#   use shebang::tui::term
+#   use shebang::tui::layout
 #
 #   tui_layout_reset rows 40
 #   tui_layout_add head  1

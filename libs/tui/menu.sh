@@ -23,7 +23,7 @@
 # nobody tried, and it is pure arithmetic, so there is no excuse for guessing.
 #
 # Usage:
-#   use shebang::tui/menu
+#   use shebang::tui::menu
 #
 #   tui_menu_reset
 #   tui_menu_heading "Disk"

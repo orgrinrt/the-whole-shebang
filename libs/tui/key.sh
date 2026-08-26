@@ -22,7 +22,7 @@
 # fingers and have it work.
 #
 # Usage:
-#   use shebang::tui/key
+#   use shebang::tui::key
 #
 #   tui_key_read || return           # blocks; sets TUI_KEY
 #   case "$(tui_key_motion)" in

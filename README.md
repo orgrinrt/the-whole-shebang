@@ -24,7 +24,7 @@ ref = "main"
 #!/usr/bin/env bash
 . "${0%/*}/lib/nutshell/init"
 
-use shebang::diagnostics/diagnostics
+use shebang::diagnostics::diagnostics
 
 finding_block "version moved on a feature branch"
 finding_note  "A version moves on a release. If this PR is one, say so."

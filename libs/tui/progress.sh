@@ -17,8 +17,8 @@
 # wanted anyway.
 #
 # Usage:
-#   use shebang::tui/term
-#   use shebang::tui/progress
+#   use shebang::tui::term
+#   use shebang::tui::progress
 #
 #   tui_progress_open 14 "Fetching packages"
 #   for p in "${pkgs[@]}"; do

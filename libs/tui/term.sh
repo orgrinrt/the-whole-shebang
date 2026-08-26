@@ -25,7 +25,7 @@
 # dead shell behind is a tool nobody starts a second time.
 #
 # Usage:
-#   use shebang::tui/term
+#   use shebang::tui::term
 #
 #   tui_begin                  # alt screen, cursor away, traps armed
 #   tui_move 3 1; printf 'hello'
