@@ -31,7 +31,7 @@
 # "someone has to look at this".
 #
 # Usage:
-#   use findings
+#   use shebang::diagnostics
 #
 #   finding_block "version moved on a feature branch"
 #   finding_note  "A version moves on a release. If this PR is one, say so."
@@ -68,30 +68,39 @@ _FINDINGS_CLEAN_TEXT="clean."
 # Recording
 # -----------------------------------------------------------------------------
 
-# finding_block <message>
+#[pub]
+# Record something that stops the caller.
 #
-# Something that stops the caller. A fact rather than an opinion: a named type
-# that does not exist, a dead link, a version that moved.
+# A fact rather than an opinion: a named type that does not exist, a dead link,
+# a version that moved.
+# Usage: finding_block <message>
 finding_block() {
     log_tagged "BLOCK" red "$*"
     _FINDINGS_BLOCK+=1
 }
 
-# finding_judge <message>
+#[pub]
+# Record something a human or a reviewing agent has to weigh.
 #
-# Something a human or a reviewing agent has to weigh. Never used for a fact
-# that speaks for itself, because routing a fact through someone's judgement
-# is how it gets waved through.
+# Never used for a fact that speaks for itself, because routing a fact through
+# someone's judgement is how it gets waved through.
+# Usage: finding_judge <message>
 finding_judge() {
     log_tagged "JUDGE" yellow "$*"
     _FINDINGS_JUDGE+=1
 }
 
-# finding_note <message>
+#[pub]
+# A continuation line under the finding above it.
 #
-# A continuation line under the finding above it. This is where a check says
-# what the finding means and what to do about it, which is the difference
-# between a report a reader can act on and a list they have to interpret.
+# Where a check says what the finding means and what to do about it, which is
+# the difference between a report a reader can act on and a list they have to
+# interpret.
+#
+# It is one call to nutshell's formatter and it stays a function of its own,
+# because the vocabulary is the library. A check that has to reach past this to
+# a log call for its second line has been handed two shapes for one report.
+# Usage: finding_note <message>
 finding_note() {
     log_substep "$*"
 }
@@ -100,12 +109,20 @@ finding_note() {
 # Counting
 # -----------------------------------------------------------------------------
 
+#[pub]
+# How many blocking findings have been recorded.
+# Usage: findings_blocking -> a count
 findings_blocking() { printf '%d' "$_FINDINGS_BLOCK"; }
+
+#[pub]
+# How many findings needing judgement have been recorded.
+# Usage: findings_judgement -> a count
 findings_judgement() { printf '%d' "$_FINDINGS_JUDGE"; }
 
-# findings_reset
-#
-# For a script checking several subjects in one run and reporting each.
+#[pub]
+# Start the counts again, for a script checking several subjects in one run
+# and reporting each.
+# Usage: findings_reset
 findings_reset() {
     _FINDINGS_BLOCK=0
     _FINDINGS_JUDGE=0
@@ -115,21 +132,22 @@ findings_reset() {
 # The verdict
 # -----------------------------------------------------------------------------
 
-# findings_explain <blocking-text> <judgement-text> [clean-text]
+#[pub]
+# What the verdict says in each case.
 #
-# What the verdict says in each case. Set per script, because "blocking" means
-# something different to a reviewer than to a release gate, and the closing
-# line is the part a reader acts on.
+# Set per script, because "blocking" means something different to a reviewer
+# than to a release gate, and the closing line is the part a reader acts on.
+# Usage: findings_explain <blocking-text> <judgement-text> [clean-text]
 findings_explain() {
     _FINDINGS_BLOCK_TEXT="$1"
     _FINDINGS_JUDGE_TEXT="$2"
     [[ $# -ge 3 ]] && _FINDINGS_CLEAN_TEXT="$3"
 }
 
-# findings_verdict
-#
-# Prints the closing text for whichever case holds and returns the exit code
-# for it. The last thing a check script does.
+#[pub]
+# Print the closing text for whichever case holds, and return the exit code for
+# it. The last thing a check script does.
+# Usage: findings_verdict -> 0 clean, 1 blocking, 3 judgement
 findings_verdict() {
     printf '\n'
     if (( _FINDINGS_BLOCK > 0 )); then
