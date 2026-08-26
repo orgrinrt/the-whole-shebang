@@ -335,22 +335,60 @@ tui_menu_run() {
             esac
         fi
 
+        # A burst of movement is one movement. A wheel event becomes a run of
+        # arrow keys, and drawing the screen for each of them makes the drawing
+        # the bottleneck: the queue outlives the gesture and the list keeps
+        # painting for seconds after the hand stopped.
+        #
+        # Only movement is absorbed. The first key that is not movement ends
+        # the run and is handed back, so nothing that acts on a row is ever
+        # swallowed by a scroll.
         motion="$(tui_key_motion)"
-        case "$motion" in
-            up)   cursor="$(_tui_menu_step "$cursor" -1)" ;;
-            down) cursor="$(_tui_menu_step "$cursor"  1)" ;;
-            home) cursor="$(_tui_menu_first)"             ;;
-            end)  cursor="$(_tui_menu_step "$(_tui_menu_first)" -1)" ;;
-            pgup) cursor="$(_tui_menu_step "$cursor" -"$height")" ;;
-            pgdn) cursor="$(_tui_menu_step "$cursor"  "$height")" ;;
-            # A modifier with an arrow moves by section. Which modifier is
-            # whatever the terminal sends, since a console that sends none of
-            # them is exactly the console this has to work in, and `[` and `]`
-            # are the fallback that always arrives.
-            *-up|'[')   cursor="$(_tui_menu_section_step "$cursor" -1)" ;;
-            *-down|']') cursor="$(_tui_menu_section_step "$cursor"  1)" ;;
-        esac
+        if _tui_menu_is_motion "$motion"; then
+            local more
+            while tui_key_read_now; do
+                more="$(tui_key_motion)"
+                if ! _tui_menu_is_motion "$more"; then
+                    tui_key_unread
+                    break
+                fi
+                cursor="$(_tui_menu_move "$cursor" "$motion" "$height")"
+                motion="$more"
+            done
+        fi
+
+        # A modifier with an arrow moves by section. Which modifier is whatever
+        # the terminal sends, since a console that sends none of them is
+        # exactly the console this has to work in, and `[` and `]` are the
+        # fallback that always arrives.
+        cursor="$(_tui_menu_move "$cursor" "$motion" "$height")"
     done
     tui_raw_off
     return 1
+}
+
+# Is this key one that only moves the cursor? The ones that are safe to absorb
+# a run of without drawing, because the run's only effect is where the cursor
+# ends up.
+_tui_menu_is_motion() {
+    case "$1" in
+        up|down|home|end|pgup|pgdn|'['|']'|*-up|*-down) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# One movement, so absorbing a run and applying the last one are the same code.
+_tui_menu_move() {
+    local cursor="$1" motion="$2" height="$3"
+    case "$motion" in
+        up)         _tui_menu_step "$cursor" -1 ;;
+        down)       _tui_menu_step "$cursor"  1 ;;
+        home)       _tui_menu_first ;;
+        end)        _tui_menu_step "$(_tui_menu_first)" -1 ;;
+        pgup)       _tui_menu_step "$cursor" -"$height" ;;
+        pgdn)       _tui_menu_step "$cursor"  "$height" ;;
+        *-up|'[')   _tui_menu_section_step "$cursor" -1 ;;
+        *-down|']') _tui_menu_section_step "$cursor"  1 ;;
+        *)          printf '%d' "$cursor" ;;
+    esac
 }

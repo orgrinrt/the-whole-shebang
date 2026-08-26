@@ -104,6 +104,38 @@ _tui_key_from_csi() {
 # Reading
 # -----------------------------------------------------------------------------
 
+# A key taken from the input and not yet used. One slot, because coalescing
+# only ever needs to look one key ahead.
+declare -g _TUI_KEY_HELD=""
+
+#[pub]
+# Put the last key back, for the next read to take.
+#
+# What lets a loop absorb a run of one kind of key and stop cleanly at a key of
+# another kind: the one that ended the run is handed back rather than dropped.
+# Usage: tui_key_unread
+tui_key_unread() { _TUI_KEY_HELD="$TUI_KEY"; }
+
+#[pub]
+# Take a key only if one is already there. Returns 1 when none is, without
+# waiting for one.
+#
+# What lets a loop take a whole burst before it draws. A wheel event becomes a
+# run of arrow keys and a velocity scroll becomes a long one, so a loop that
+# reads one key and redraws the whole screen has the drawing as its bottleneck
+# and the queue outlives the gesture by seconds. Nothing here makes the drawing
+# faster and nothing needs to: any render is slower than the rate a terminal
+# enqueues keys.
+# Usage: while tui_key_read_now; do ... done
+tui_key_read_now() {
+    _TUI_KEY_NOW=1
+    tui_key_read
+    local rc=$?
+    _TUI_KEY_NOW=0
+    return $rc
+}
+declare -gi _TUI_KEY_NOW=0
+
 #[pub]
 # Block until a key is available, then name it in TUI_KEY.
 #
@@ -113,9 +145,24 @@ _tui_key_from_csi() {
 # Usage: tui_key_read -> sets TUI_KEY, returns 0, or 1 at end of input
 tui_key_read() {
     local c rest seq ch
+
+    # A key handed back by `tui_key_unread` is the next one, before the input.
+    if [[ -n "$_TUI_KEY_HELD" ]]; then
+        TUI_KEY="$_TUI_KEY_HELD"; _TUI_KEY_HELD=""
+        return 0
+    fi
+
     TUI_KEY=""
 
-    IFS= read -r -n1 -d '' c 2>/dev/null || return 1
+    # `_TUI_KEY_NOW` is the coalescing read: take a key that is already there
+    # and give up rather than wait. The window is short enough not to be felt
+    # and long enough to catch the next key of a burst, which arrives at the
+    # terminal's own rate rather than a person's.
+    if (( _TUI_KEY_NOW == 1 )); then
+        IFS= read -r -n1 -d '' -t 0.02 c 2>/dev/null || return 1
+    else
+        IFS= read -r -n1 -d '' c 2>/dev/null || return 1
+    fi
 
     case "$c" in
         $'\033')

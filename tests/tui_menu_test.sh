@@ -881,3 +881,102 @@ it_never_leaves_the_cursor_on_a_heading_after_regrouping() {
     done
     assert_empty "$bad"
 }
+
+# --- a burst of movement is one movement -------------------------------------
+#
+# A wheel event becomes a run of arrow keys and a velocity scroll becomes a
+# long one. Drawing the screen for each of them makes the drawing the
+# bottleneck: the queue outlives the gesture and the list keeps painting for
+# seconds after the hand stopped.
+
+# How many times the menu drew, for a given run of keys.
+declare -gi _MENU_DRAWS=0
+_menu_draws() {
+    local keys="$1"
+    _menu_kinds
+    _MENU_DRAWS=0
+    eval "$(declare -f _tui_menu_render | sed '1s/_tui_menu_render/_menu_real_render/')"
+    # Counted into a global. A local would be invisible to the stub once the
+    # helper is itself called from a command substitution.
+    _tui_menu_render() { _MENU_DRAWS=$(( _MENU_DRAWS + 1 )); }
+    # From a file, not a pipe. A pipeline runs `tui_menu_run` in a subshell,
+    # so the count and the choice it makes are thrown away with it.
+    local f; f="$(mktemp)"; printf '%b' "$keys" > "$f"
+    tui_menu_run "t" >/dev/null 2>&1 < "$f"
+    rm -f "$f"
+    unset -f _tui_menu_render
+    eval "$(declare -f _menu_real_render | sed '1s/_menu_real_render/_tui_menu_render/')"
+    unset -f _menu_real_render
+    printf '%d' "$_MENU_DRAWS"
+}
+
+#[test]
+it_draws_once_for_a_run_of_movement() {
+    # Twenty downs is one gesture. Without coalescing this is twenty screens.
+    local draws; draws="$(_menu_draws 'jjjjjjjjjjjjjjjjjjjj')"
+    assert_ok test "$draws" -lt 4
+}
+
+#[test]
+it_draws_for_each_separate_movement() {
+    # The control. Coalescing must be about what is already waiting, not about
+    # throwing movement away: a key pressed on its own still redraws.
+    local one many
+    one="$(_menu_draws 'j')"
+    many="$(_menu_draws 'jjjjjjjjjjjjjjjjjjjj')"
+    assert_ok test "$one" -ge 1
+    # Twenty keys must not cost twenty times what one costs.
+    assert_ok test "$many" -lt $(( one * 4 ))
+}
+
+#[test]
+it_does_not_swallow_a_key_that_acts_on_a_row() {
+    # The one that matters. A scroll that ate the enter after it would run
+    # nothing, or worse, run the wrong row.
+    _menu_kinds
+    local f; f="$(mktemp)"; printf 'jjjj\n' > "$f"
+    tui_menu_run "t" >/dev/null 2>&1 < "$f"; rm -f "$f"
+    assert_ne "$TUI_MENU_CHOICE" ""
+}
+
+#[test]
+it_lands_where_the_whole_run_would_have_landed() {
+    # Absorbing a run must apply all of it, not just the last key.
+    _menu_kinds
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    local f; f="$(mktemp)"; printf 'jj\n' > "$f"
+    tui_menu_run "t" >/dev/null 2>&1 < "$f"; rm -f "$f"
+    local after_two="$TUI_MENU_CHOICE"
+    _menu_kinds
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    f="$(mktemp)"; printf 'j\n' > "$f"
+    tui_menu_run "t" >/dev/null 2>&1 < "$f"; rm -f "$f"
+    assert_ne "$after_two" "$TUI_MENU_CHOICE"
+}
+
+#[test]
+it_knows_which_keys_only_move_the_cursor() {
+    local k
+    for k in up down home end pgup pgdn '[' ']' ctrl-up shift-down; do
+        assert_ok _tui_menu_is_motion "$k"
+    done
+    for k in enter q '/' '?' a g s f esc space; do
+        assert_fails _tui_menu_is_motion "$k"
+    done
+}
+
+#[test]
+it_hands_back_a_key_it_looked_at_and_did_not_use() {
+    TUI_KEY="enter"
+    tui_key_unread
+    TUI_KEY=""
+    assert_ok tui_key_read
+    assert_eq "$TUI_KEY" "enter"
+}
+
+#[test]
+it_takes_nothing_when_nothing_is_waiting() {
+    # The whole point of the coalescing read: it gives up rather than waiting,
+    # or the loop would block until the next key instead of drawing.
+    assert_fails tui_key_read_now </dev/null
+}
