@@ -421,6 +421,11 @@ it_reads_a_byte_count_the_way_somebody_does() {
     assert_eq "$(tui_bytes 1073741823)" "1023 MiB"
     assert_eq "$(tui_bytes 1073741824)" "1.0 GiB"
     assert_eq "$(tui_bytes 1236641792)" "1.1 GiB"
+    # The disk sizes this is actually reached for. Stopping at GiB reported a
+    # two terabyte drive as `2048.0 GiB`.
+    assert_eq "$(tui_bytes 1099511627775)" "1023.9 GiB"
+    assert_eq "$(tui_bytes 1099511627776)" "1.0 TiB"
+    assert_eq "$(tui_bytes 2199023255552)" "2.0 TiB"
 }
 
 #[test]
@@ -503,4 +508,32 @@ it_will_not_close_a_run_it_already_stopped() {
     out="$(tui_progress_open 4 ""; tui_progress_stop "gave up"; tui_progress_close)"
     assert_contains "$out" "stopped"
     assert_fails grep -q 'done' <<<"$out"
+}
+
+#[test]
+it_does_not_close_a_byte_run_as_done_when_a_step_failed() {
+    # `tui_progress_fail` is one step of many failing, not the run giving up.
+    # In a byte run it adds a byte to the transfer and reports a step tally,
+    # and the run is still open afterwards. The header used to teach this call
+    # for a failed transfer, which is the call that defeats the feature.
+    local out
+    out="$(tui_progress_open 1048576 "" bytes
+           tui_progress_set 524288
+           tui_progress_fail "the transfer stopped"
+           tui_progress_close)"
+    # It counted a step, so the byte count moved by one.
+    assert_contains "$out" "1 failed"
+    # And this is what the header was teaching: it still says done.
+    assert_contains "$out" "done"
+}
+
+#[test]
+it_says_stopped_for_the_same_case_the_header_now_shows() {
+    local out
+    out="$(tui_progress_open 1048576 "" bytes
+           tui_progress_set 524288
+           tui_progress_stop "the transfer stopped")"
+    assert_contains "$out" "stopped at 512 KiB"
+    assert_fails grep -q 'done' <<<"$out"
+    assert_fails grep -q 'failed' <<<"$out"
 }

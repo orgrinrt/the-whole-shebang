@@ -39,7 +39,13 @@
 #   # rather than 1236641792.
 #   tui_progress_open "$total" "Fetching the image" bytes
 #   tui_progress_set "$(stat -f %z "$f")"
-#   tui_progress_fail "the transfer stopped"     # failed: not "done"
+#   tui_progress_stop "the transfer stopped"     # gave up: not "done"
+#
+# `tui_progress_stop` is the whole run giving up. `tui_progress_fail` is one
+# step of many failing and the run carrying on, so it counts a step and leaves
+# the run open. Reaching for it here adds a byte to the transfer, reports a
+# step tally inside a byte run, and still closes with `done`, which is the one
+# thing this pair exists to prevent.
 # =============================================================================
 
 [[ -n "${_SHEBANG_TUI_PROGRESS_SH:-}" ]] && return 0
@@ -206,7 +212,13 @@ tui_progress_pct() {
 tui_bytes() {
     local n="${1:-0}"
     [[ "$n" =~ ^[0-9]+$ ]] || n=0
-    if   (( n >= 1073741824 )); then
+    # TiB is not a corner here. This library is reached for by a tool that
+    # images disks, and stopping at GiB reported a two terabyte drive as
+    # `2048.0 GiB`.
+    if   (( n >= 1099511627776 )); then
+        printf '%s.%s TiB' "$(( n / 1099511627776 ))" \
+            "$(( (n % 1099511627776) * 10 / 1099511627776 ))"
+    elif (( n >= 1073741824 )); then
         printf '%s.%s GiB' "$(( n / 1073741824 ))" \
             "$(( (n % 1073741824) * 10 / 1073741824 ))"
     elif (( n >= 1048576 )); then printf '%s MiB' "$(( n / 1048576 ))"
