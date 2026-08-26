@@ -471,7 +471,7 @@ it_shows_no_panel_when_there_is_nothing_to_lay_one_out_with() {
     local out
     out="$(bash -c '
         cd '"$PWD"'
-        . lib/nutshell/init; . libs/tui/term.sh; . libs/tui/menu.sh
+        . "$NUTSHELL_INIT"; . libs/tui/term.sh; . libs/tui/menu.sh
         tui_menu_reset; tui_menu_aside a b
         TUI_COLS=200; _tui_menu_aside_width')"
     assert_eq "$out" "0"
