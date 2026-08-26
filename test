@@ -18,7 +18,7 @@ HERE="${BASH_SOURCE[0]%/*}"
 . "$HERE/lib/find-nutshell"
 nutshell_find "" "${SHEBANG_NUTSHELL_REF:-dev}" || exit 1
 # shellcheck source=/dev/null
-. "$NUTSHELL_INIT"
+. "$NUTSHELL_INIT" || exit 1
 
 # Resolved once, and everything a test starts inherits it. Without this each
 # subshell resolves the pin again, and the tests set their own XDG directories,
