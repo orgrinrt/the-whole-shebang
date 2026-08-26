@@ -421,3 +421,51 @@ it_counts_only_what_it_actually_dropped() {
     tui_plan_solve
     assert_eq "$TUI_PLAN_DROPPED" "1"
 }
+
+#[test]
+it_answers_quickly_enough_to_run_on_every_keypress() {
+    # A menu redraws on every key. The backtracking version this replaced took
+    # two and a half minutes on ten panels that did not all fit, which is not a
+    # slow feature but a hang.
+    local start end
+    start="$(date +%s)"
+    local i
+    for i in 1 2 3 4 5; do
+        tui_plan_reset 100 30
+        tui_plan_main 60 20
+        local j
+        for j in 1 2 3 4 5 6 7 8 9 10; do
+            tui_plan_panel "p$j" "$j" 30x8 40x6 20x12 60x4
+        done
+        tui_plan_solve
+    done
+    end="$(date +%s)"
+    assert_ok test $(( end - start )) -lt 5
+}
+
+#[test]
+it_places_the_same_way_every_time() {
+    # A deterministic pass, not a search whose answer depends on the order it
+    # happened to explore. This is what makes a second implementation, in
+    # another language, checkable against this one.
+    local first second i
+    _arrangement() {
+        tui_plan_reset 120 40
+        tui_plan_main 60 20
+        tui_plan_panel a 1 30x12 58x5
+        tui_plan_panel b 2 24x8  40x4
+        tui_plan_panel c 3 20x6
+        tui_plan_solve
+        local p out=""
+        for p in a b c; do
+            out="${out}${p}:$(tui_plan_row $p),$(tui_plan_col $p),$(tui_plan_w $p),$(tui_plan_h $p) "
+        done
+        printf '%s' "$out"
+    }
+    first="$(_arrangement)"
+    for i in 1 2 3; do
+        second="$(_arrangement)"
+        assert_eq "$second" "$first"
+    done
+    unset -f _arrangement
+}
