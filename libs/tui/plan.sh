@@ -156,12 +156,13 @@ _plan_sort_shapes() {
     local -a shapes=() areas=()
     local shape w h i j n=0
     for shape in "$@"; do
-        # The `x` has to be there. Without the test, `30` splits into `30` and
-        # `30` and a typo for `30x8` becomes a 30x30 panel: a size nobody
-        # declared, which is the one thing this promises never to place.
-        [[ "$shape" == *x* ]] || continue
+        # The whole shape, in one test. Checking that an `x` is present and
+        # that each half is a number is three properties of the string rather
+        # than the shape of it, and it let `30` through as 30x30 and `30x8x9`
+        # through as 30x9: sizes nobody declared, which is the one thing this
+        # promises never to place.
+        [[ "$shape" =~ ^[0-9]+x[0-9]+$ ]] || continue
         w="${shape%%x*}"; h="${shape##*x}"
-        [[ "$w" =~ ^[0-9]+$ && "$h" =~ ^[0-9]+$ ]] || continue
         # A zero in either dimension is not a panel. `tui_plan_has` already
         # says no to one, while the drop count said it was placed, so the same
         # panel was both.

@@ -2,12 +2,16 @@
 # Shared helpers for the suite. Not a test file: `test_run_dir` only picks up
 # `*_test.sh`, so this is sourced by the files that want it.
 
-# Does this finish, or does it spin?
+# Does this finish on its own, and did it work?
 #
 # A test for a loop that used to hang cannot simply call the thing: the
 # regression would wedge the suite instead of failing it. So the call runs in
-# its own bash, a watchdog kills it after a couple of seconds, and what is
-# asserted is that it finished on its own.
+# its own bash and a watchdog kills it after a couple of seconds.
+#
+# It runs under `set -e`, so the contract is finished **and** every command in
+# it returned zero. That is deliberate, and it means this is the wrong tool for
+# a call that legitimately returns non-zero: wrap such a call in something that
+# swallows the status before handing it over.
 #
 # Usage: _finishes 'tui_table_col note 2fr --head'
 _finishes() {

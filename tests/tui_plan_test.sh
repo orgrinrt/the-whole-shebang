@@ -643,17 +643,20 @@ it_never_places_a_panel_inside_the_region_it_reports() {
 }
 
 #[test]
-it_refuses_a_shape_with_no_x_in_it() {
-    # `30` split into `30` and `30`, so a typo for `30x8` became a 30x30 panel:
-    # a size nobody declared, which is the one thing the model promises never
-    # to place. The existing malformed-shape test fed the word `nonsense`,
-    # which was already rejected, and missed the one that was accepted.
-    tui_plan_reset 100 40
-    tui_plan_main 20 10
-    tui_plan_panel a 1 30
-    tui_plan_solve
-    assert_fails tui_plan_has a
-    assert_eq "$TUI_PLAN_DROPPED" "1"
+it_refuses_anything_that_is_not_two_numbers_with_an_x_between_them() {
+    # The class, not one member of it. `30` came out as 30x30 and `30x8x9` as
+    # 30x9, both sizes nobody declared, and the existing malformed-shape test
+    # fed the word `nonsense`, which was already rejected. Swept, because
+    # picking which malformed shapes to try is picking which to keep shipping.
+    local bad kept=""
+    for bad in 30 30x8x9 -5x8 30x x8 x 8x-2 30X8 'thirty x eight' ' '; do
+        tui_plan_reset 100 40
+        tui_plan_main 20 10
+        tui_plan_panel a 1 "$bad"
+        tui_plan_solve
+        tui_plan_has a && kept="${kept} [${bad}]->$(tui_plan_shape a)"
+    done
+    assert_empty "$kept"
 }
 
 #[test]
