@@ -105,16 +105,33 @@ tui_report_exit() {
     esac
 }
 
+# Styling, but only when the terminal said so. This module used to consult
+# nothing at all: it printed the colour variables and relied on a different
+# library having blanked them, by a different rule, at the moment it was
+# sourced. That is not the same as being safe in a pipe, and a test asserting
+# it was safe could only pass by blanking the variables itself.
+declare -g _TUI_R_DIM="" _TUI_R_BOLD="" _TUI_R_RED="" _TUI_R_GREEN="" \
+           _TUI_R_YELLOW="" _TUI_R_NC=""
+_tui_report_styles() {
+    if (( ${TUI_COLOR:-0} == 1 )) && tui_is_tty; then
+        _TUI_R_DIM="$DIM"; _TUI_R_BOLD="$BOLD"; _TUI_R_NC="$NC"
+        _TUI_R_RED="$RED"; _TUI_R_GREEN="$GREEN"; _TUI_R_YELLOW="$YELLOW"
+    else
+        _TUI_R_DIM=""; _TUI_R_BOLD=""; _TUI_R_NC=""
+        _TUI_R_RED=""; _TUI_R_GREEN=""; _TUI_R_YELLOW=""
+    fi
+}
+
 # The mark for a status. Words rather than symbols alone: a red dot means
 # nothing over ssh to a terminal with no colour, and this is a tool that gets
 # used over exactly that.
 _tui_report_mark() {
     case "$1" in
-        ok)   printf '%sok  %s'   "$GREEN"  "$NC" ;;
-        warn) printf '%swarn%s'   "$YELLOW" "$NC" ;;
-        fail) printf '%sfail%s'   "$RED"    "$NC" ;;
-        skip) printf '%sskip%s'   "$DIM"    "$NC" ;;
-        *)    printf '%s--  %s'   "$DIM"    "$NC" ;;
+        ok)   printf '%sok  %s'   "$_TUI_R_GREEN"  "$_TUI_R_NC" ;;
+        warn) printf '%swarn%s'   "$_TUI_R_YELLOW" "$_TUI_R_NC" ;;
+        fail) printf '%sfail%s'   "$_TUI_R_RED"    "$_TUI_R_NC" ;;
+        skip) printf '%sskip%s'   "$_TUI_R_DIM"    "$_TUI_R_NC" ;;
+        *)    printf '%s--  %s'   "$_TUI_R_DIM"    "$_TUI_R_NC" ;;
     esac
 }
 
@@ -123,6 +140,7 @@ _tui_report_mark() {
 # Usage: tui_report_show [title]
 tui_report_show() {
     local title="${1:-}" i n w=0 len
+    _tui_report_styles
     n="${#TUI_REPORT_STATUS[@]}"
 
     if (( n == 0 )); then
@@ -139,29 +157,29 @@ tui_report_show() {
     done
     (( w > 32 )) && w=32
 
-    [[ -n "$title" ]] && printf '\n%s%s%s\n\n' "$BOLD" "$title" "$NC"
+    [[ -n "$title" ]] && printf '\n%s%s%s\n\n' "$_TUI_R_BOLD" "$title" "$_TUI_R_NC"
 
     for (( i = 0; i < n; i++ )); do
         printf '  %s  %-*s  %s%s%s\n' \
             "$(_tui_report_mark "${TUI_REPORT_STATUS[$i]}")" \
             "$w" "${TUI_REPORT_NAME[$i]}" \
-            "$DIM" "${TUI_REPORT_NOTE[$i]}" "$NC"
+            "$_TUI_R_DIM" "${TUI_REPORT_NOTE[$i]}" "$_TUI_R_NC"
     done
 
     local ok warn fail skip
     ok="$(tui_report_count ok)";     warn="$(tui_report_count warn)"
     fail="$(tui_report_count fail)"; skip="$(tui_report_count skip)"
     printf '\n  %d checked' "$n"
-    (( fail > 0 )) && printf ', %s%d failed%s' "$RED" "$fail" "$NC"
-    (( warn > 0 )) && printf ', %s%d worth a look%s' "$YELLOW" "$warn" "$NC"
+    (( fail > 0 )) && printf ', %s%d failed%s' "$_TUI_R_RED" "$fail" "$_TUI_R_NC"
+    (( warn > 0 )) && printf ', %s%d worth a look%s' "$_TUI_R_YELLOW" "$warn" "$_TUI_R_NC"
     (( skip > 0 )) && printf ', %d not applicable' "$skip"
-    (( fail == 0 && warn == 0 )) && printf ', %snothing wrong%s' "$GREEN" "$NC"
+    (( fail == 0 && warn == 0 )) && printf ', %snothing wrong%s' "$_TUI_R_GREEN" "$_TUI_R_NC"
     printf '\n'
 
     # And again, underneath. By the time thirty checks have run, the one that
     # failed is off the top of the screen.
     if (( fail > 0 || warn > 0 )); then
-        printf '\n%sWhat to look at%s\n\n' "$BOLD" "$NC"
+        printf '\n%sWhat to look at%s\n\n' "$_TUI_R_BOLD" "$_TUI_R_NC"
         for (( i = 0; i < n; i++ )); do
             case "${TUI_REPORT_STATUS[$i]}" in
                 fail|warn) ;;
@@ -170,7 +188,7 @@ tui_report_show() {
             printf '  %s  %s\n' \
                 "$(_tui_report_mark "${TUI_REPORT_STATUS[$i]}")" "${TUI_REPORT_NAME[$i]}"
             [[ -n "${TUI_REPORT_NOTE[$i]}" ]] \
-                && printf '        %s%s%s\n' "$DIM" "${TUI_REPORT_NOTE[$i]}" "$NC"
+                && printf '        %s%s%s\n' "$_TUI_R_DIM" "${TUI_REPORT_NOTE[$i]}" "$_TUI_R_NC"
         done
     fi
     return 0

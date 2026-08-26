@@ -48,21 +48,41 @@ use color
 declare -gi _TUI_FRAME_OPEN=0
 declare -g  _TUI_FRAME_TITLE=""
 declare -gi TUI_FRAME_WIDTH=0     # inner width, set by tui_frame_open
+declare -gi _TUI_FRAME_PLAIN=0    # drawing without a border at all
 
-# The glyphs. Plain ASCII on a terminal that has not said it can do better,
-# because a box drawn in mojibake is worse than no box: it reads as corruption,
-# and corruption is exactly what somebody running a recovery tool is afraid of.
+# Declared here, with the safe set as the default, rather than created inside
+# whichever branch happens to run. The open flag used to be set before the
+# branch that made these, so a frame opened before tui_probe -- "reading
+# config", the obvious first thing a tool says -- left the flag claiming a
+# frame was open with no glyphs behind it, and the next line drawn died on an
+# unbound variable. term.sh declares all of its state at file scope for exactly
+# this reason.
+declare -g _TUI_F_TL="+" _TUI_F_TR="+" _TUI_F_BL="+" _TUI_F_BR="+"
+declare -g _TUI_F_H="-"  _TUI_F_V="|"  _TUI_F_ELL="..."
+
+# Below this there is no room for a border and the text both, so the border
+# goes and the text stays. A box wider than the screen wraps, and the right
+# edge lands under the left one.
+declare -gi _TUI_FRAME_MIN=24
+
+# The glyphs, and the mark used when a line is cut. They travel together: an
+# ellipsis is three bytes of UTF-8, and putting one inside an ASCII border is
+# the mojibake the ASCII border exists to avoid.
 _tui_frame_glyphs() {
     if [[ "${TUI_FRAME_ASCII:-0}" == "1" ]] || ! _tui_frame_unicode_ok; then
         _TUI_F_TL="+"; _TUI_F_TR="+"; _TUI_F_BL="+"; _TUI_F_BR="+"
-        _TUI_F_H="-";  _TUI_F_V="|"
+        _TUI_F_H="-";  _TUI_F_V="|";  _TUI_F_ELL="..."
     else
-        _TUI_F_TL="┌"; _TUI_F_TR="┐"; _TUI_F_BL="└"; _TUI_F_BR="┘"
-        _TUI_F_H="─";  _TUI_F_V="│"
+        _TUI_F_TL="\u250c"; _TUI_F_TR="\u2510"; _TUI_F_BL="\u2514"; _TUI_F_BR="\u2518"
+        _TUI_F_H="\u2500";  _TUI_F_V="\u2502";  _TUI_F_ELL="\u2026"
+        printf -v _TUI_F_TL '%b' "$_TUI_F_TL"; printf -v _TUI_F_TR '%b' "$_TUI_F_TR"
+        printf -v _TUI_F_BL '%b' "$_TUI_F_BL"; printf -v _TUI_F_BR '%b' "$_TUI_F_BR"
+        printf -v _TUI_F_H  '%b' "$_TUI_F_H";  printf -v _TUI_F_V  '%b' "$_TUI_F_V"
+        printf -v _TUI_F_ELL '%b' "$_TUI_F_ELL"
     fi
 }
 
-# A locale that is not UTF-8 will render the box characters as several bytes of
+# A locale that is not UTF-8 renders the box characters as several bytes of
 # nonsense, and the linux console before a font is loaded is the usual place
 # that happens -- which is to say, exactly where this tool gets used.
 _tui_frame_unicode_ok() {
@@ -73,9 +93,21 @@ _tui_frame_unicode_ok() {
     [[ "${TERM:-}" != "linux" ]]
 }
 
-# How wide the frame may be. Narrow terminals are real -- a serial console is
-# 80, a phone over ssh is less -- and a frame wider than the terminal wraps into
-# a mess that hides the text it was meant to set apart.
+# Styling, but only when the terminal said so. term.sh probes it; nutshell's
+# colour module decides separately, at source time, by a different rule. Two
+# policies is one too many, and the one that knows about this session wins.
+_tui_frame_styles() {
+    if (( ${TUI_COLOR:-0} == 1 )); then
+        _TUI_F_DIM="$DIM"; _TUI_F_BOLD="$BOLD"; _TUI_F_NC="$NC"
+    else
+        _TUI_F_DIM=""; _TUI_F_BOLD=""; _TUI_F_NC=""
+    fi
+}
+declare -g _TUI_F_DIM="" _TUI_F_BOLD="" _TUI_F_NC=""
+
+# How wide to draw. Never wider than the terminal: flooring the frame rather
+# than the terminal is how a 10-column console got a 20-column box, every line
+# of which wrapped.
 _tui_frame_width() {
     local w
     # Whatever the last probe found. Re-measuring here would fork an stty for
@@ -85,7 +117,7 @@ _tui_frame_width() {
     w="${TUI_COLS:-80}"
     [[ "$w" =~ ^[0-9]+$ ]] || w=80
     (( w > 100 )) && w=100
-    (( w < 20 ))  && w=20
+    (( w < 1 ))   && w=1
     printf '%d' $(( w - 2 ))
 }
 
@@ -97,13 +129,41 @@ _tui_frame_rep() {
     printf '%s' "${out// /$c}"
 }
 
-# The visible width of a string. Not the byte count: a box drawn with the
-# byte count is a box that gets wider every time somebody puts a é in a title.
-_tui_frame_vis() {
+#[pub]
+# The number of characters in a string, styling removed. Codepoints, not
+# display columns: a CJK character occupies two columns and counts as one here,
+# so a title in CJK draws a box wider than it measures. Fine for the consoles
+# this is for, and worth knowing before relying on it elsewhere.
+# Usage: tui_frame_vis <text> -> a number
+tui_frame_vis() {
     local s="$1"
-    # Strip any styling first, then count characters rather than bytes.
-    s="$(printf '%s' "$s" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g')"
+    s="${s//$'\033'\[/$'\033'}"          # cheap first pass, no fork
+    s="$(printf '%s' "$1" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' 2>/dev/null)" || s="$1"
     printf '%d' "${#s}"
+}
+
+# A string cut to n characters with the mark on the end, without splitting a
+# character in half. In a non-UTF-8 locale bash indexes bytes, so a plain cut
+# can leave a lone lead byte -- which is the corruption the ASCII fallback
+# exists to avoid, arriving by another door.
+_tui_frame_cut() {
+    local s="$1" n="$2" mark="$_TUI_F_ELL" keep
+    (( n <= 0 )) && { printf ''; return 0; }
+    keep=$(( n - ${#mark} ))
+    (( keep < 0 )) && keep=0
+    s="${s:0:$keep}"
+    # Drop a trailing partial sequence: any run of continuation bytes, and then
+    # a lead byte with nothing after it.
+    if ! _tui_frame_unicode_ok; then
+        while [[ -n "$s" ]] && LC_ALL=C grep -q $'[\xc0-\xff][\x80-\xbf]\{0,2\}$' <<<"$s" 2>/dev/null; do
+            local last="${s: -1}"
+            case "$last" in
+                [$'\x80'-$'\xbf']) s="${s%?}" ;;
+                *) s="${s%?}"; break ;;
+            esac
+        done
+    fi
+    printf '%s%s' "$s" "$mark"
 }
 
 #[pub]
@@ -115,48 +175,67 @@ tui_frame_open() {
     _TUI_FRAME_OPEN=1
     TUI_FRAME_WIDTH="$(_tui_frame_width)"
 
-    if ! tui_is_tty; then
-        # In a log, a frame is a heading. The information is the same and the
-        # shape is what that medium uses for it.
+    # Unconditionally, and before anything can be drawn. Whether there is a
+    # terminal decides how it looks, never whether the state exists.
+    _tui_frame_glyphs
+    _tui_frame_styles
+
+    _TUI_FRAME_PLAIN=0
+    if ! tui_is_tty || (( TUI_FRAME_WIDTH + 2 < _TUI_FRAME_MIN )); then
+        # In a log, and on a screen too narrow to hold a border and words both,
+        # a frame is a heading. The information is the same; the shape is what
+        # that medium uses for it.
+        _TUI_FRAME_PLAIN=1
         [[ -n "$title" ]] && printf '%s\n' "$title"
         return 0
     fi
 
-    _tui_frame_glyphs
     local bar t_len
-    t_len="$(_tui_frame_vis "$title")"
+    t_len="$(tui_frame_vis "$title")"
     if [[ -n "$title" ]] && (( t_len + 4 <= TUI_FRAME_WIDTH )); then
         bar="$(_tui_frame_rep "$_TUI_F_H" $(( TUI_FRAME_WIDTH - t_len - 3 )))"
         printf '%s%s%s %s%s%s %s%s%s\n' \
-            "${DIM}" "$_TUI_F_TL" "$_TUI_F_H" "${NC}${BOLD}" "$title" "${NC}${DIM}" \
-            "$bar" "$_TUI_F_TR" "${NC}"
+            "${_TUI_F_DIM}" "$_TUI_F_TL" "$_TUI_F_H" "${_TUI_F_NC}${_TUI_F_BOLD}" \
+            "$title" "${_TUI_F_NC}${_TUI_F_DIM}" "$bar" "$_TUI_F_TR" "${_TUI_F_NC}"
     else
         bar="$(_tui_frame_rep "$_TUI_F_H" "$TUI_FRAME_WIDTH")"
-        printf '%s%s%s%s%s\n' "${DIM}" "$_TUI_F_TL" "$bar" "$_TUI_F_TR" "${NC}"
+        printf '%s%s%s%s%s\n' "${_TUI_F_DIM}" "$_TUI_F_TL" "$bar" "$_TUI_F_TR" "${_TUI_F_NC}"
     fi
 }
 
 #[pub]
-# One line inside the open frame. Longer than the frame is truncated rather
-# than wrapped: a wrapped line breaks the right-hand border and makes the whole
-# thing look broken, and a line that long is a line that wanted to be two.
+# One line inside the open frame. A line longer than the frame is cut rather
+# than wrapped, because a wrapped line breaks the right-hand border and makes
+# the whole thing look broken. A line containing newlines becomes several rows,
+# since the obvious thing to hand this is a captured command's output.
 # Usage: tui_frame_say <text>
 tui_frame_say() {
-    local text="${1:-}"
-    if (( _TUI_FRAME_OPEN == 0 )) || ! tui_is_tty; then
+    local text="${1:-}" line
+    if (( _TUI_FRAME_OPEN == 0 )) || (( _TUI_FRAME_PLAIN == 1 )); then
         printf '%s\n' "$text"
         return 0
     fi
+    if [[ "$text" == *$'\n'* ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            _tui_frame_row "$line"
+        done <<< "$text"
+        return 0
+    fi
+    _tui_frame_row "$text"
+}
 
-    local inner=$(( TUI_FRAME_WIDTH - 2 )) len pad
-    len="$(_tui_frame_vis "$text")"
+_tui_frame_row() {
+    local text="${1:-}" inner=$(( TUI_FRAME_WIDTH - 2 )) len pad
+    (( inner < 1 )) && inner=1
+    len="$(tui_frame_vis "$text")"
     if (( len > inner )); then
-        text="${text:0:$(( inner - 1 ))}…"
-        len="$inner"
+        text="$(_tui_frame_cut "$text" "$inner")"
+        len="$(tui_frame_vis "$text")"
     fi
     pad="$(_tui_frame_rep " " $(( inner - len )))"
     printf '%s%s%s %s%s %s%s%s\n' \
-        "${DIM}" "$_TUI_F_V" "${NC}" "$text" "$pad" "${DIM}" "$_TUI_F_V" "${NC}"
+        "${_TUI_F_DIM}" "$_TUI_F_V" "${_TUI_F_NC}" "$text" "$pad" \
+        "${_TUI_F_DIM}" "$_TUI_F_V" "${_TUI_F_NC}"
 }
 
 #[pub]
@@ -165,9 +244,9 @@ tui_frame_say() {
 tui_frame_close() {
     if (( _TUI_FRAME_OPEN == 0 )); then return 0; fi
     _TUI_FRAME_OPEN=0
-    if ! tui_is_tty; then printf '\n'; return 0; fi
+    if (( _TUI_FRAME_PLAIN == 1 )); then printf '\n'; return 0; fi
     local bar; bar="$(_tui_frame_rep "$_TUI_F_H" "$TUI_FRAME_WIDTH")"
-    printf '%s%s%s%s%s\n' "${DIM}" "$_TUI_F_BL" "$bar" "$_TUI_F_BR" "${NC}"
+    printf '%s%s%s%s%s\n' "${_TUI_F_DIM}" "$_TUI_F_BL" "$bar" "$_TUI_F_BR" "${_TUI_F_NC}"
 }
 
 #[pub]
@@ -183,15 +262,18 @@ tui_frame_box() {
 
 #[pub]
 # Run something whose output belongs to it, not to us. Nothing is framed,
-# nothing is captured, nothing is reformatted -- it streams exactly as it would
-# have without us. The frame is a claim about authorship and this output is
-# somebody else's.
+# captured or reformatted -- it streams as it would have without us, which for
+# a session on the alternate screen means handing the screen back first. That
+# is tui_suspend's job and this does not reimplement it.
 # Usage: tui_frame_foreign <command> [args...] -> returns the command's status
 tui_frame_foreign() {
-    local was="$_TUI_FRAME_OPEN"
+    local was="$_TUI_FRAME_OPEN" rc
     (( was == 1 )) && tui_frame_close
-    "$@"
-    local rc=$?
+    if declare -F tui_suspend >/dev/null 2>&1; then
+        tui_suspend "$@"; rc=$?
+    else
+        "$@"; rc=$?
+    fi
     (( was == 1 )) && tui_frame_open "$_TUI_FRAME_TITLE"
     return "$rc"
 }

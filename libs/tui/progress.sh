@@ -53,6 +53,33 @@ declare -gi _TUI_PROG_START=0
 
 _TUI_PROG_SPINNER='|/-\'
 
+# The mark for a label that had to be cut. ASCII unless the terminal has said
+# it can do better: an ellipsis is three bytes of UTF-8, and on the console
+# this is aimed at that renders as noise.
+declare -g _TUI_PROG_ELL="..."
+
+_tui_progress_marks() {
+    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+        *UTF-8*|*utf8*|*UTF8*|*utf-8*)
+            if [[ "${TERM:-}" != "linux" ]]; then
+                printf -v _TUI_PROG_ELL '%b' '\u2026'; return 0
+            fi ;;
+    esac
+    _TUI_PROG_ELL="..."
+}
+
+# Styling, but only when the terminal said so, so that this module and term.sh
+# agree about one session rather than two libraries deciding separately.
+declare -g _TUI_PROG_DIM="" _TUI_PROG_BOLD="" _TUI_PROG_GREEN="" _TUI_PROG_NC=""
+_tui_progress_styles() {
+    if (( ${TUI_COLOR:-0} == 1 )) && tui_is_tty; then
+        _TUI_PROG_DIM="$DIM"; _TUI_PROG_BOLD="$BOLD"
+        _TUI_PROG_GREEN="$GREEN"; _TUI_PROG_NC="$NC"
+    else
+        _TUI_PROG_DIM=""; _TUI_PROG_BOLD=""; _TUI_PROG_GREEN=""; _TUI_PROG_NC=""
+    fi
+}
+
 #[pub]
 # Start counting. A total of 0 means the size is not known, which is a
 # different thing from there being nothing to do.
@@ -66,12 +93,14 @@ tui_progress_open() {
     _TUI_PROG_SPIN=0
     _TUI_PROG_OPEN=1
     _TUI_PROG_START="$(printf '%(%s)T' -1 2>/dev/null || date +%s)"
+    _tui_progress_marks
+    _tui_progress_styles
 
     if ! tui_is_tty; then
         [[ -n "$title" ]] && printf '%s\n' "$title"
         return 0
     fi
-    [[ -n "$title" ]] && printf '%s%s%s\n' "$BOLD" "$title" "$NC"
+    [[ -n "$title" ]] && printf '%s%s%s\n' "$_TUI_PROG_BOLD" "$title" "$_TUI_PROG_NC"
     return 0
 }
 
@@ -105,7 +134,11 @@ tui_progress_bar() {
     local done="${1:-0}" total="${2:-0}" width="${3:-20}" filled rest
     [[ "$done" =~ ^[0-9]+$ ]]  || done=0
     [[ "$total" =~ ^[0-9]+$ ]] || total=0
-    [[ "$width" =~ ^[0-9]+$ ]] || width=20
+    # A width that is a number but not a sensible one is clamped, and one that
+    # is not a number at all falls back to the default. Two rules used to
+    # disagree about the same idea: 0 clamped to 1 while -3 quietly became 20,
+    # so a typo'd width drew a plausible bar of the wrong size.
+    [[ "$width" =~ ^-?[0-9]+$ ]] || width=20
     (( width < 1 )) && width=1
     if (( total <= 0 )); then
         printf '%*s' "$width" ''
@@ -150,31 +183,52 @@ _tui_progress_draw() {
 
     local cols="${TUI_COLS:-80}"
     [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
-    local width=$(( cols / 3 ))
-    (( width > 40 )) && width=40
-    (( width < 8 ))  && width=8
+    (( cols < 1 )) && cols=1
 
     printf '\r'
     tui_clear_line 2>/dev/null || true
 
+    # The redraw clears one physical line. Anything drawn wider than the
+    # terminal wraps, and the wrapped part is not cleared, so a narrow console
+    # collects a line of leftovers per step. Nothing here may exceed cols.
+    local furniture=14                       # "  [", "] 100%  "
+    local width=$(( cols / 3 ))
+    (( width > 40 )) && width=40
+    (( cols - furniture < width )) && width=$(( cols - furniture ))
+
     if (( _TUI_PROG_TOTAL > 0 )); then
         local pct; pct="$(tui_progress_pct "$_TUI_PROG_DONE" "$_TUI_PROG_TOTAL")"
-        printf '  %s[%s]%s %3s%%  %s' \
-            "$DIM" "$(tui_progress_bar "$_TUI_PROG_DONE" "$_TUI_PROG_TOTAL" "$width")" \
-            "$NC" "$pct" "$(_tui_progress_fit "$label" $(( cols - width - 14 )))"
+        if (( width < 4 )); then
+            # No room for a bar worth drawing. The number carries the
+            # information anyway.
+            printf '%s' "$(_tui_progress_fit "${pct}% ${label}" "$cols")"
+        else
+            printf '  %s[%s]%s %3s%%  %s' \
+                "$_TUI_PROG_DIM" \
+                "$(tui_progress_bar "$_TUI_PROG_DONE" "$_TUI_PROG_TOTAL" "$width")" \
+                "$_TUI_PROG_NC" "$pct" \
+                "$(_tui_progress_fit "$label" $(( cols - width - furniture )))"
+        fi
     else
         _TUI_PROG_SPIN=$(( (_TUI_PROG_SPIN + 1) % 4 ))
-        printf '  %s%s%s  %s' "$DIM" "${_TUI_PROG_SPINNER:$_TUI_PROG_SPIN:1}" "$NC" \
-            "$(_tui_progress_fit "$label" $(( cols - 8 )))"
+        if (( cols < 8 )); then
+            printf '%s' "${_TUI_PROG_SPINNER:$_TUI_PROG_SPIN:1}"
+        else
+            printf '  %s%s%s  %s' "$_TUI_PROG_DIM" \
+                "${_TUI_PROG_SPINNER:$_TUI_PROG_SPIN:1}" "$_TUI_PROG_NC" \
+                "$(_tui_progress_fit "$label" $(( cols - 8 )))"
+        fi
     fi
 }
 
 # A label cut to fit. Left as it is when it fits, which is almost always.
 _tui_progress_fit() {
-    local s="${1:-}" n="${2:-0}"
+    local s="${1:-}" n="${2:-0}" keep
     (( n < 4 )) && { printf ''; return 0; }
     (( ${#s} <= n )) && { printf '%s' "$s"; return 0; }
-    printf '%s…' "${s:0:$(( n - 1 ))}"
+    keep=$(( n - ${#_TUI_PROG_ELL} ))
+    (( keep < 0 )) && keep=0
+    printf '%s%s' "${s:0:$keep}" "$_TUI_PROG_ELL"
 }
 
 #[pub]
@@ -196,6 +250,6 @@ tui_progress_close() {
     fi
     printf '\r'
     tui_clear_line 2>/dev/null || true
-    printf '  %sdone%s  %d in %ds%s\n' "$GREEN" "$NC" "$_TUI_PROG_DONE" "$took" \
+    printf '  %sdone%s  %d in %ds%s\n' "$_TUI_PROG_GREEN" "$_TUI_PROG_NC" "$_TUI_PROG_DONE" "$took" \
         "${1:+  ${1}}"
 }

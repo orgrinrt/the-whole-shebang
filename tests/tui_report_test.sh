@@ -211,30 +211,67 @@ it_does_not_let_one_enormous_name_wreck_the_table() {
 
 #[test]
 it_writes_no_control_bytes_with_no_terminal() {
-    TUI_TTY=0
-    NC=""; BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""
+    # The colour variables are set here, deliberately, to real escapes. The
+    # first version of this test blanked them and then asserted that no escapes
+    # appeared -- proving only that it had blanked them, in the one place a
+    # reader would look to find out whether the module is safe in a pipe.
+    local RED=$'\033[31m' GREEN=$'\033[32m' YELLOW=$'\033[33m'
+    local DIM=$'\033[2m'  BOLD=$'\033[1m'  NC=$'\033[0m'
+    TUI_TTY=0; TUI_COLOR=0
     tui_report_reset
     tui_report_row fail "a" "b"
+    tui_report_row ok   "c" "d"
     local out; out="$(tui_report_show "T")"
     assert_fails grep -q $'\x1b' <<<"$out"
 }
 
 #[test]
+it_writes_colour_when_there_is_a_terminal_that_wants_it() {
+    # The other half. Without it, the test above is satisfied by a module that
+    # never emits colour at all, and nothing would notice colour disappearing.
+    local RED=$'\033[31m' GREEN=$'\033[32m' YELLOW=$'\033[33m'
+    local DIM=$'\033[2m'  BOLD=$'\033[1m'  NC=$'\033[0m'
+    TUI_TTY=1; TUI_COLOR=1
+    tui_report_reset
+    tui_report_row fail "a" "b"
+    local out; out="$(tui_report_show "T")"
+    assert_ok grep -q $'\x1b' <<<"$out"
+    TUI_TTY=0; TUI_COLOR=0
+}
+
+#[test]
 it_names_the_status_in_words_not_only_in_colour() {
     tui_report_reset
-    tui_report_row fail "a"; tui_report_row warn "b"; tui_report_row ok "c"
+    tui_report_row fail "alpha"; tui_report_row warn "beta"; tui_report_row ok "gamma"
     local out; out="$(tui_report_show | _strip)"
-    # Over ssh to a terminal with no colour, a coloured dot says nothing.
-    assert_ok grep -q 'fail' <<<"$out"
-    assert_ok grep -q 'warn' <<<"$out"
-    assert_ok grep -q 'ok'   <<<"$out"
+    # Anchored to the row the status belongs to. Unanchored, `grep -q ok`
+    # matched the word "look" in the summary line and `grep -q fail` matched
+    # "1 failed", so two thirds of this survived the marks being deleted.
+    assert_ok grep -qE '^ +fail +alpha' <<<"$out"
+    assert_ok grep -qE '^ +warn +beta'  <<<"$out"
+    assert_ok grep -qE '^ +ok +gamma'   <<<"$out"
+}
+
+#[test]
+it_has_a_detector_that_notices_the_marks_going_missing() {
+    # The positive control for the test above, which is the one that was
+    # fooled. With the mark emptied, the anchored patterns must stop matching.
+    _tui_report_mark() { printf ''; }
+    tui_report_reset
+    tui_report_row fail "alpha"
+    local out; out="$(tui_report_show | _strip)"
+    assert_fails grep -qE '^ +fail +alpha' <<<"$out"
+    unset -f _tui_report_mark
+    . "${BASH_SOURCE[0]%/*}/../libs/tui/report.sh" 2>/dev/null || true
 }
 
 #[test]
 it_prints_a_row_with_no_note_at_all() {
     tui_report_reset
     tui_report_row ok "bare"
-    local out; out="$(tui_report_show | _strip)"
+    local out; out="$(tui_report_show 2>&1 | _strip)"
     assert_ok grep -q 'bare' <<<"$out"
+    # 2>&1 inside the substitution, or the diagnostic this looks for goes to
+    # stderr, is never captured, and the assertion cannot fail.
     assert_fails grep -qi 'unbound' <<<"$out"
 }

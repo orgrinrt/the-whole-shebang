@@ -81,8 +81,14 @@ it_survives_being_handed_something_that_is_not_a_number() {
 it_never_draws_a_zero_width_bar() {
     local out; out="$(tui_progress_bar 5 10 0)"
     assert_eq "${#out}" "1"
+    # Exact, not a bound. `-ge 1` passed on the real answer and would have
+    # passed on any answer at all.
     out="$(tui_progress_bar 5 10 -3)"
-    assert_ok test "${#out}" -ge 1
+    assert_eq "${#out}" "1"
+    # A width that is not a number is a different case from one that is a bad
+    # number, and falls back to the default rather than to the minimum.
+    out="$(tui_progress_bar 5 10 wide)"
+    assert_eq "${#out}" "20"
 }
 
 # --- the percentage ------------------------------------------------------------
@@ -160,7 +166,10 @@ it_ignores_a_close_twice() {
 it_takes_a_total_that_is_not_a_number_as_unknown() {
     TUI_TTY=0
     local out
-    out="$(tui_progress_open notanumber "T"; tui_progress_step a; tui_progress_close 2>&1)"
+    # The 2>&1 belongs to the whole substitution. Attached to the last command
+    # it misses stderr from tui_progress_open, which is the call taking the
+    # non-numeric argument and the entire point of the test.
+    out="$( { tui_progress_open notanumber "T"; tui_progress_step a; tui_progress_close; } 2>&1 )"
     # Unknown size, so no fabricated fraction.
     assert_fails grep -q '\[1/' <<<"$out"
     assert_fails grep -qi 'unbound\|syntax error' <<<"$out"
@@ -182,4 +191,150 @@ it_jumps_to_a_count_for_work_finished_in_batches() {
     out="$(tui_progress_open 10 T; tui_progress_set 7 seven; tui_progress_close)"
     assert_ok grep -q '\[7/10\] seven' <<<"$out"
     assert_ok grep -q 'done, 7'        <<<"$out"
+}
+
+# --- the half that draws --------------------------------------------------------
+#
+# Every test above sets TUI_TTY=0, so the spinner, the label budget and the
+# width clamp had no coverage at all -- and two real bugs lived in exactly
+# there. What was easy to test got tested.
+
+_pstrip() { sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'; }
+# The widest line actually drawn, in characters, with the carriage returns that
+# separate redraws turned into line breaks.
+_pwidest() {
+    local w=0 l
+    while IFS= read -r l; do
+        l="${l%%$'\r'*}"
+        (( ${#l} > w )) && w="${#l}"
+    done < <(tr '\r' '\n' <<<"$1" | _pstrip)
+    printf '%d' "$w"
+}
+
+#[test]
+it_never_draws_wider_than_the_terminal() {
+    TUI_TTY=1
+    local c out w
+    for c in 5 10 15 20 24 40 80 120; do
+        out="$(WANT_COLS=$c bash -c '
+            . lib/nutshell/init 2>/dev/null
+            . libs/tui/term.sh; . libs/tui/progress.sh
+            # After sourcing: term.sh declares TUI_COLS at file scope, so a
+            # value inherited from the environment is overwritten by the
+            # default the moment the module loads.
+            TUI_TTY=1; TUI_COLS="${WANT_COLS}"
+            tui_progress_open 10 "T"
+            tui_progress_step "a label long enough to need cutting on a small screen"
+            tui_progress_step "another"
+        ' 2>&1)"
+        w="$(_pwidest "$out")"
+        # The redraw clears one physical line. Anything wider wraps, and the
+        # wrapped part survives the clear, so a narrow console piles up one
+        # line of leftovers per step.
+        assert_ok test "$w" -le "$c"
+    done
+    TUI_TTY=0
+}
+
+#[test]
+it_draws_a_spinner_when_the_size_is_unknown() {
+    local out
+    out="$(WANT_COLS=40 bash -c '
+        . lib/nutshell/init 2>/dev/null
+        . libs/tui/term.sh; . libs/tui/progress.sh
+        TUI_TTY=1; TUI_COLS="${WANT_COLS}"
+        tui_progress_open 0 "Scanning"
+        tui_progress_step one; tui_progress_step two
+    ' 2>&1 | _pstrip)"
+    # A bar creeping to 90% and stopping is a bar that lies about how far along
+    # it is, and people learn to ignore those.
+    assert_fails grep -q '#' <<<"$out"
+    assert_ok    grep -q '[|/\-]' <<<"$out"
+}
+
+#[test]
+it_cuts_a_long_label_with_a_mark_the_terminal_can_draw() {
+    local out
+    out="$(LC_ALL=C LANG=C WANT_COLS=40 bash -c '
+        . lib/nutshell/init 2>/dev/null
+        . libs/tui/term.sh; . libs/tui/progress.sh
+        TUI_TTY=1; TUI_COLS="${WANT_COLS}"
+        tui_progress_open 10 "T"
+        tui_progress_step "a label far longer than the space left for it on this line"
+    ' 2>&1 | _pstrip)"
+    # An ellipsis is three bytes of UTF-8, and this module is aimed at a
+    # console that renders those as noise.
+    assert_fails grep -q '…' <<<"$out"
+    assert_ok    grep -q '\.\.\.' <<<"$out"
+}
+
+#[test]
+it_uses_the_nicer_mark_where_it_renders() {
+    local out
+    out="$(LC_ALL=en_US.UTF-8 TERM=xterm WANT_COLS=40 bash -c '
+        . lib/nutshell/init 2>/dev/null
+        . libs/tui/term.sh; . libs/tui/progress.sh
+        TUI_TTY=1; TUI_COLS="${WANT_COLS}"
+        tui_progress_open 10 "T"
+        tui_progress_step "a label far longer than the space left for it on this line"
+    ' 2>&1 | _pstrip)"
+    assert_ok grep -q '…' <<<"$out"
+}
+
+#[test]
+it_keeps_the_percentage_when_there_is_no_room_for_a_bar() {
+    local out
+    out="$(WANT_COLS=12 bash -c '
+        . lib/nutshell/init 2>/dev/null
+        . libs/tui/term.sh; . libs/tui/progress.sh
+        TUI_TTY=1; TUI_COLS="${WANT_COLS}"
+        tui_progress_open 4 "T"
+        tui_progress_step one; tui_progress_step two
+    ' 2>&1 | _pstrip)"
+    # The number is the part that carries the information. The bar is the part
+    # that can be dropped.
+    assert_ok grep -q '50%' <<<"$out"
+}
+
+#[test]
+it_writes_no_colour_when_the_terminal_said_no_colour() {
+    local out
+    out="$(WANT_COLS=40 bash -c '
+        . lib/nutshell/init 2>/dev/null
+        . libs/tui/term.sh; . libs/tui/progress.sh
+        DIM=$'"'"'\033[2m'"'"'; BOLD=$'"'"'\033[1m'"'"'; GREEN=$'"'"'\033[32m'"'"'; NC=$'"'"'\033[0m'"'"'
+        TUI_TTY=1; TUI_COLOR=0; TUI_COLS="${WANT_COLS}"
+        tui_progress_open 2 "T"; tui_progress_step a; tui_progress_close
+    ' 2>&1)"
+    # Not "no escapes at all": clearing the line is terminal control and is
+    # right even with colour off. What must be absent is the colour itself.
+    assert_fails grep -qE $'\x1b\[[0-9;]*m' <<<"$out"
+}
+
+#[test]
+it_writes_colour_when_the_terminal_wants_it() {
+    local out
+    out="$(WANT_COLS=40 bash -c '
+        . lib/nutshell/init 2>/dev/null
+        . libs/tui/term.sh; . libs/tui/progress.sh
+        DIM=$'"'"'\033[2m'"'"'; BOLD=$'"'"'\033[1m'"'"'; GREEN=$'"'"'\033[32m'"'"'; NC=$'"'"'\033[0m'"'"'
+        TUI_TTY=1; TUI_COLOR=1; TUI_COLS="${WANT_COLS}"
+        tui_progress_open 2 "T"; tui_progress_step a; tui_progress_close
+    ' 2>&1)"
+    # Or the test above is satisfied by a module that never colours anything.
+    assert_ok grep -qE $'\x1b\[[0-9;]*m' <<<"$out"
+}
+
+#[test]
+it_says_how_long_it_took() {
+    local out
+    out="$(WANT_COLS=40 bash -c '
+        . lib/nutshell/init 2>/dev/null
+        . libs/tui/term.sh; . libs/tui/progress.sh
+        TUI_TTY=1; TUI_COLS="${WANT_COLS}"
+        tui_progress_open 1 "T"; tui_progress_step a; tui_progress_close
+    ' 2>&1 | _pstrip)"
+    # "Did that hang or is it just slow" is the question a bar exists to
+    # answer, and the answer is worth keeping after it finishes.
+    assert_ok grep -qE 'done.*1 in [0-9]+s' <<<"$out"
 }
