@@ -326,6 +326,34 @@ _tui_lead_len() {
     elif (( n >= 192 && n <= 223 )); then printf '2'
     else printf '0'; fi
 }
+#[pub]
+# How wide a string is on the screen, ignoring the colour in it.
+#
+# Anything lining a column up has to measure what the eye sees rather than what
+# the string holds, or a cell carrying colour pushes everything after it. Two
+# copies of this existed, in frame and in modal, and both forked `sed` for
+# every measurement on a path that redraws on a keypress.
+#
+# A scan rather than a substitution, because it runs per cell per row: a fork
+# costs more than walking a short string, and a menu is a hundred short ones.
+# Usage: tui_vis <text> -> a number
+tui_vis() {
+    local s="$1" n=0 i c
+    # The common case, and the reason this is cheap: no escape at all.
+    [[ "$s" != *$'\033'* ]] && { printf '%d' "${#s}"; return 0; }
+    for (( i = 0; i < ${#s}; i++ )); do
+        c="${s:i:1}"
+        if [[ "$c" == $'\033' ]]; then
+            i=$(( i + 1 ))
+            [[ "${s:i:1}" == "[" || "${s:i:1}" == "]" ]] && i=$(( i + 1 ))
+            # A CSI ends on a letter; everything before it is parameters.
+            while (( i < ${#s} )) && [[ ! "${s:i:1}" =~ [A-Za-z] ]]; do i=$(( i + 1 )); done
+            continue
+        fi
+        n=$(( n + 1 ))
+    done
+    printf '%d' "$n"
+}
 
 #[pub]
 # A string cut to n characters with the mark on the end.

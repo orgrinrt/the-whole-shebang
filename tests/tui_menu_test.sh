@@ -11,6 +11,8 @@ use test
 . "${BASH_SOURCE[0]%/*}/../libs/tui/key.sh"
 . "${BASH_SOURCE[0]%/*}/../libs/tui/layout.sh"
 . "${BASH_SOURCE[0]%/*}/../libs/tui/menu.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/menu/view.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/menu/draw.sh"
 
 # heading, three entries, heading, two entries
 fixture() {
@@ -95,19 +97,24 @@ it_steps_over_a_heading() {
 }
 
 #[test]
-it_stops_at_the_end_rather_than_wrapping() {
-    # Wrapping in a list whose first rows are headings throws the cursor
-    # somewhere nobody asked for.
+it_wraps_at_either_end_rather_than_stopping() {
+    # A list is a ring. Stopping dead means the way to the bottom of a long
+    # list is to hold a key down, and it makes the two ends feel like walls
+    # rather than like the same place. The headings at either end are skipped
+    # on the way round, so the cursor still lands somewhere it can rest.
     fixture
-    assert_eq "$(_tui_menu_step 6 1)" "6"
-    assert_eq "$(_tui_menu_step 1 -1)" "1"
+    assert_eq "$(_tui_menu_step 6 1)" "1"
+    assert_eq "$(_tui_menu_step 1 -1)" "6"
 }
 
 #[test]
-it_clamps_a_step_larger_than_the_list() {
+it_clamps_a_page_larger_than_the_list() {
+    # A page does not wrap: paging past the end lands on the end, which is what
+    # every list with a page key does, and a page that wrapped would lose the
+    # reader's place entirely.
     fixture
-    assert_eq "$(_tui_menu_step 1 99)"  "1"
-    assert_eq "$(_tui_menu_step 6 -99)" "6"
+    assert_eq "$(_tui_menu_step 1 99)"  "6"
+    assert_eq "$(_tui_menu_step 6 -99)" "1"
 }
 
 #[test]
@@ -249,11 +256,14 @@ it_drops_a_heading_whose_entries_all_vanish() {
 #[test]
 it_keeps_a_heading_whose_entries_survive() {
     # The control for the heading rule: dropping every heading would satisfy
-    # the test above.
+    # the test above. Asked through the accessor, because the view holds a
+    # heading as an index that is not a row.
     fixture
     TUI_MENU_TEXT=(Disk Alpha Beta Gamma Boot Delta Epsilon)
     TUI_MENU_FILTER="alpha"; tui_menu_refilter
-    assert_eq "${TUI_MENU_VIEW[0]}" "0"
+    assert_eq "$(tui_menu_heading_at 0)" "Disk"
+    assert_fails tui_menu_raw 0
+    TUI_MENU_FILTER=""
 }
 
 #[test]
@@ -503,11 +513,10 @@ it_finds_a_row_by_the_name_it_is_called_by() {
     # `iso-fetch` found nothing, because only the label was searched.
     TUI_MENU_FILTER="fe"
     tui_menu_refilter
-    local found=""
-    local i
-    for i in "${TUI_MENU_VIEW[@]}"; do
-        [[ "${TUI_MENU_STATE[$i]}" == "heading" ]] && continue
-        found="${found}${TUI_MENU_ID[$i]} "
+    local found="" i raw
+    for i in "${!TUI_MENU_VIEW[@]}"; do
+        raw="$(tui_menu_raw "$i")" || continue
+        found="${found}${TUI_MENU_ID[$raw]} "
     done
     assert_eq "$found" "iso-fetch "
     TUI_MENU_FILTER=""
@@ -523,4 +532,619 @@ it_still_finds_a_row_by_its_label_and_its_note() {
     TUI_MENU_FILTER="network"; tui_menu_refilter
     assert_eq "${#TUI_MENU_VIEW[@]}" "2"
     TUI_MENU_FILTER=""
+}
+
+# --- the cursor is a ring ----------------------------------------------------
+#
+# Stopping dead at the ends means the way to the bottom of a long list is to
+# hold a key down, and it makes the top and the bottom feel like walls rather
+# than like the same place.
+
+_menu_two_sections() {
+    tui_menu_reset
+    tui_menu_heading a
+    tui_menu_entry one   One   ok ""
+    tui_menu_entry two   Two   ok ""
+    tui_menu_heading b
+    tui_menu_entry three Three ok ""
+    tui_menu_entry four  Four  ok ""
+    tui_menu_refilter
+}
+
+#[test]
+it_wraps_from_the_first_row_to_the_last() {
+    _menu_two_sections
+    assert_eq "$(_tui_menu_step 1 -1)" "5"
+}
+
+#[test]
+it_wraps_from_the_last_row_to_the_first() {
+    _menu_two_sections
+    assert_eq "$(_tui_menu_step 5 1)" "1"
+}
+
+#[test]
+it_skips_a_heading_on_the_way_round() {
+    # Wrapping must not land on a heading, which is not landable, and the
+    # heading is exactly what sits at either end of the ring.
+    _menu_two_sections
+    assert_eq "$(_tui_menu_step 2 1)" "4"
+    assert_eq "$(_tui_menu_step 4 -1)" "2"
+}
+
+#[test]
+it_stays_put_when_nothing_is_landable() {
+    # A list of nothing but headings has no ring to go round, and a wrap that
+    # searches forever is a hang.
+    tui_menu_reset
+    tui_menu_heading a
+    tui_menu_heading b
+    tui_menu_refilter
+    assert_eq "$(_tui_menu_step 0 1)" "0"
+    assert_eq "$(_tui_menu_step 0 -1)" "0"
+}
+
+#[test]
+it_does_not_wrap_a_page() {
+    # Paging past the end lands on the end, which is what every list with a
+    # page key does. A page that wrapped would lose the reader's place.
+    _menu_two_sections
+    assert_eq "$(_tui_menu_step 1 10)" "5"
+    assert_eq "$(_tui_menu_step 5 -10)" "1"
+}
+
+#[test]
+it_never_lands_a_page_on_a_heading() {
+    _menu_two_sections
+    local i
+    for i in 1 2 4 5; do
+        assert_ok _tui_menu_landable "$(_tui_menu_step "$i" 3)"
+        assert_ok _tui_menu_landable "$(_tui_menu_step "$i" -3)"
+    done
+}
+
+# --- moving by section -------------------------------------------------------
+
+#[test]
+it_moves_down_to_the_top_of_the_next_section() {
+    _menu_two_sections
+    assert_eq "$(_tui_menu_section_step 1 1)" "4"
+    assert_eq "$(_tui_menu_section_step 2 1)" "4"
+}
+
+#[test]
+it_moves_up_to_the_top_of_this_section_first() {
+    # What every editor's paragraph movement does, and what a reader expects
+    # from a key that means back a section.
+    _menu_two_sections
+    assert_eq "$(_tui_menu_section_step 2 -1)" "1"
+    assert_eq "$(_tui_menu_section_step 5 -1)" "4"
+}
+
+#[test]
+it_moves_up_to_the_previous_section_when_already_at_the_top() {
+    _menu_two_sections
+    assert_eq "$(_tui_menu_section_step 4 -1)" "1"
+}
+
+#[test]
+it_wraps_by_section_too() {
+    _menu_two_sections
+    assert_eq "$(_tui_menu_section_step 4 1)" "1"
+    assert_eq "$(_tui_menu_section_step 1 -1)" "4"
+}
+
+#[test]
+it_stays_put_moving_by_section_in_a_list_with_none() {
+    tui_menu_reset
+    tui_menu_entry x X ok ""
+    tui_menu_entry y Y ok ""
+    tui_menu_refilter
+    assert_eq "$(_tui_menu_section_step 0 1)" "0"
+    assert_eq "$(_tui_menu_section_step 0 -1)" "0"
+}
+
+#[test]
+it_moves_by_section_over_the_filtered_view() {
+    # The view is what the reader sees, so section movement has to be over it
+    # and not over the rows underneath.
+    _menu_two_sections
+    TUI_MENU_FILTER="Th"
+    tui_menu_refilter
+    local first; first="$(_tui_menu_first)"
+    assert_eq "$(_tui_menu_section_step "$first" 1)" "$first"
+    TUI_MENU_FILTER=""
+    tui_menu_refilter
+}
+
+# --- what the terminal sends -------------------------------------------------
+
+#[test]
+it_names_a_modified_arrow() {
+    assert_eq "$(_tui_key_from_csi '1;2A')" "shift-up"
+    assert_eq "$(_tui_key_from_csi '1;5B')" "ctrl-down"
+    assert_eq "$(_tui_key_from_csi '1;3C')" "alt-right"
+}
+
+#[test]
+it_still_names_a_plain_arrow() {
+    assert_eq "$(_tui_key_from_csi 'A')" "up"
+    assert_eq "$(_tui_key_from_csi 'B')" "down"
+}
+
+#[test]
+it_reads_a_modifier_it_does_not_know_as_the_arrow_itself() {
+    # A key nobody named should move the cursor rather than do nothing.
+    assert_eq "$(_tui_key_from_csi '1;9A')" "up"
+}
+
+#[test]
+it_does_not_fold_a_modified_arrow_into_plain_motion() {
+    # `tui_key_motion` folds the arrows and the vi keys together. A modified
+    # one has to come out the other side intact or the menu cannot tell it
+    # from the plain one.
+    TUI_KEY="ctrl-down"
+    assert_eq "$(tui_key_motion)" "ctrl-down"
+    TUI_KEY="down"
+    assert_eq "$(tui_key_motion)" "down"
+}
+
+# --- grouping, sorting, and a filter that is not a search --------------------
+
+_menu_kinds() {
+    tui_menu_reset
+    TUI_MENU_GROUP=section; TUI_MENU_SORT=declared
+    TUI_MENU_FILTERS=(); TUI_MENU_FILTER_ON=""
+    tui_menu_heading disk
+    tui_menu_entry disk-health "Zebra check"  ok  "" check
+    tui_menu_entry disk-wipe   "apple erase"  off "" action
+    tui_menu_heading net
+    tui_menu_entry net-status  "Mango check"  ok  "" check
+    tui_menu_entry net-doctor  "Beta fix"     ok  "" fix
+    tui_menu_refilter
+}
+
+# The labels the reader sees, headings in angle brackets, as one line.
+_menu_shape() {
+    local i raw out=""
+    for i in "${!TUI_MENU_VIEW[@]}"; do
+        if raw="$(tui_menu_raw "$i")"; then out="${out}${TUI_MENU_TEXT[$raw]}|"
+        else out="${out}<$(tui_menu_heading_at "$i")>|"; fi
+    done
+    printf '%s' "$out"
+}
+
+#[test]
+it_groups_by_the_section_it_was_declared_under() {
+    _menu_kinds
+    assert_eq "$(_menu_shape)" "<disk>|Zebra check|apple erase|<net>|Mango check|Beta fix|"
+}
+
+#[test]
+it_groups_by_kind_instead() {
+    # The declared headings are the wrong headings once the cut changes, so the
+    # grouping makes its own rather than keeping them.
+    _menu_kinds
+    TUI_MENU_GROUP=kind; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "<check>|Zebra check|Mango check|<action>|apple erase|<fix>|Beta fix|"
+}
+
+#[test]
+it_drops_the_headings_entirely_when_asked() {
+    _menu_kinds
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "Zebra check|apple erase|Mango check|Beta fix|"
+}
+
+#[test]
+it_sorts_by_name_inside_a_group() {
+    # Inside, not across: sorting the whole list alphabetically would
+    # interleave the groups, which is the thing grouping exists to stop.
+    _menu_kinds
+    TUI_MENU_SORT=name; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "<disk>|apple erase|Zebra check|<net>|Beta fix|Mango check|"
+}
+
+#[test]
+it_sorts_case_insensitively() {
+    # `apple` before `Zebra` rather than after it: two alphabets is not an
+    # order anybody reads.
+    _menu_kinds
+    TUI_MENU_GROUP=none; TUI_MENU_SORT=name; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "apple erase|Beta fix|Mango check|Zebra check|"
+}
+
+#[test]
+it_sorts_what_can_be_run_to_the_top() {
+    # The order somebody scanning for something to do wants: the rows they can
+    # act on above the ones they cannot.
+    _menu_kinds
+    TUI_MENU_GROUP=none; TUI_MENU_SORT=state; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "Beta fix|Mango check|Zebra check|apple erase|"
+}
+
+#[test]
+it_leaves_the_declared_order_alone_by_default() {
+    # The control for the two sorts. A list somebody arranged by hand is
+    # arranged for a reason.
+    _menu_kinds
+    TUI_MENU_GROUP=none; TUI_MENU_SORT=declared; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "Zebra check|apple erase|Mango check|Beta fix|"
+}
+
+#[test]
+it_cycles_the_grouping_and_comes_back_round() {
+    _menu_kinds
+    tui_menu_group_next; assert_eq "$TUI_MENU_GROUP" "kind"
+    tui_menu_group_next; assert_eq "$TUI_MENU_GROUP" "none"
+    tui_menu_group_next; assert_eq "$TUI_MENU_GROUP" "section"
+}
+
+#[test]
+it_cycles_the_ordering_and_comes_back_round() {
+    _menu_kinds
+    tui_menu_sort_next; assert_eq "$TUI_MENU_SORT" "name"
+    tui_menu_sort_next; assert_eq "$TUI_MENU_SORT" "state"
+    tui_menu_sort_next; assert_eq "$TUI_MENU_SORT" "declared"
+}
+
+#[test]
+it_filters_by_a_question_rather_than_by_text() {
+    # The distinction the search cannot cover: "the ones I can run" is not a
+    # word that appears in any row.
+    _menu_kinds
+    _only_runnable() { [[ "${TUI_MENU_STATE[$1]}" == "ok" ]]; }
+    tui_menu_filter runnable _only_runnable
+    tui_menu_filter_on runnable
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    unset -f _only_runnable
+    assert_eq "$(_menu_shape)" "Zebra check|Mango check|Beta fix|"
+}
+
+#[test]
+it_keeps_everything_with_no_filter_on() {
+    # The control: a filter that is off has to change nothing.
+    _menu_kinds
+    _only_runnable() { [[ "${TUI_MENU_STATE[$1]}" == "ok" ]]; }
+    tui_menu_filter runnable _only_runnable
+    tui_menu_filter_on ""
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    unset -f _only_runnable
+    assert_eq "$(_menu_shape)" "Zebra check|apple erase|Mango check|Beta fix|"
+}
+
+#[test]
+it_combines_the_filter_with_the_search() {
+    # They are separate questions and both apply.
+    _menu_kinds
+    _only_runnable() { [[ "${TUI_MENU_STATE[$1]}" == "ok" ]]; }
+    tui_menu_filter runnable _only_runnable
+    tui_menu_filter_on runnable
+    TUI_MENU_GROUP=none; TUI_MENU_FILTER="check"; tui_menu_refilter
+    TUI_MENU_FILTER=""
+    unset -f _only_runnable
+    assert_eq "$(_menu_shape)" "Zebra check|Mango check|"
+}
+
+#[test]
+it_cycles_through_the_filters_and_back_to_none() {
+    _menu_kinds
+    _a() { return 0; }; _b() { return 0; }
+    tui_menu_filter one _a
+    tui_menu_filter two _b
+    tui_menu_filter_on ""
+    assert_eq "$(_tui_menu_filter_next)" "one"
+    tui_menu_filter_on one
+    assert_eq "$(_tui_menu_filter_next)" "two"
+    tui_menu_filter_on two
+    assert_empty "$(_tui_menu_filter_next)"
+    unset -f _a _b
+}
+
+#[test]
+it_ignores_a_filter_whose_function_is_gone() {
+    # A caller that registered a filter and then unset the function should get
+    # every row, not none of them: a menu that empties itself because of a
+    # missing helper is a menu nobody can use.
+    _menu_kinds
+    tui_menu_filter ghost _no_such_predicate
+    tui_menu_filter_on ghost
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    assert_eq "$(_menu_shape)" "Zebra check|apple erase|Mango check|Beta fix|"
+}
+
+#[test]
+it_puts_rows_with_no_kind_under_one_heading() {
+    # Grouping by a thing half the rows do not declare still has to produce a
+    # list, and a row with no kind is not a row with an empty kind.
+    tui_menu_reset
+    TUI_MENU_GROUP=kind; TUI_MENU_SORT=declared
+    TUI_MENU_FILTERS=(); TUI_MENU_FILTER_ON=""
+    tui_menu_heading s
+    tui_menu_entry a "A" ok "" check
+    tui_menu_entry b "B" ok ""
+    tui_menu_refilter
+    assert_eq "$(_menu_shape)" "<check>|A|<other>|B|"
+}
+
+#[test]
+it_never_leaves_the_cursor_on_a_heading_after_regrouping() {
+    # Every arrangement has to leave a landable first row, or the first key
+    # press goes somewhere nobody asked for.
+    local g so bad=""
+    for g in section kind none; do
+        for so in declared name state; do
+            _menu_kinds
+            TUI_MENU_GROUP="$g"; TUI_MENU_SORT="$so"; tui_menu_refilter
+            _tui_menu_landable "$(_tui_menu_first)" || bad="${bad} ${g}/${so}"
+        done
+    done
+    assert_empty "$bad"
+}
+
+# --- a burst of movement is one movement -------------------------------------
+#
+# A wheel event becomes a run of arrow keys and a velocity scroll becomes a
+# long one. Drawing the screen for each of them makes the drawing the
+# bottleneck: the queue outlives the gesture and the list keeps painting for
+# seconds after the hand stopped.
+
+# How many times the menu drew, for a given run of keys.
+declare -gi _MENU_DRAWS=0
+_menu_draws() {
+    local keys="$1"
+    _menu_kinds
+    _MENU_DRAWS=0
+    eval "$(declare -f _tui_menu_render | sed '1s/_tui_menu_render/_menu_real_render/')"
+    # Counted into a global. A local would be invisible to the stub once the
+    # helper is itself called from a command substitution.
+    _tui_menu_render() { _MENU_DRAWS=$(( _MENU_DRAWS + 1 )); }
+    # From a file, not a pipe. A pipeline runs `tui_menu_run` in a subshell,
+    # so the count and the choice it makes are thrown away with it.
+    local f; f="$(mktemp)"; printf '%b' "$keys" > "$f"
+    tui_menu_run "t" >/dev/null 2>&1 < "$f"
+    rm -f "$f"
+    unset -f _tui_menu_render
+    eval "$(declare -f _menu_real_render | sed '1s/_menu_real_render/_tui_menu_render/')"
+    unset -f _menu_real_render
+    printf '%d' "$_MENU_DRAWS"
+}
+
+#[test]
+it_draws_once_for_a_run_of_movement() {
+    # Twenty downs is one gesture. Without coalescing this is twenty screens.
+    local draws; draws="$(_menu_draws 'jjjjjjjjjjjjjjjjjjjj')"
+    assert_ok test "$draws" -lt 4
+}
+
+#[test]
+it_draws_for_each_separate_movement() {
+    # The control. Coalescing must be about what is already waiting, not about
+    # throwing movement away: a key pressed on its own still redraws.
+    local one many
+    one="$(_menu_draws 'j')"
+    many="$(_menu_draws 'jjjjjjjjjjjjjjjjjjjj')"
+    assert_ok test "$one" -ge 1
+    # Twenty keys must not cost twenty times what one costs.
+    assert_ok test "$many" -lt $(( one * 4 ))
+}
+
+#[test]
+it_does_not_swallow_a_key_that_acts_on_a_row() {
+    # The one that matters. A scroll that ate the enter after it would run
+    # nothing, or worse, run the wrong row.
+    _menu_kinds
+    local f; f="$(mktemp)"; printf 'jjjj\n' > "$f"
+    tui_menu_run "t" >/dev/null 2>&1 < "$f"; rm -f "$f"
+    assert_ne "$TUI_MENU_CHOICE" ""
+}
+
+#[test]
+it_lands_where_the_whole_run_would_have_landed() {
+    # Absorbing a run must apply all of it, not just the last key.
+    _menu_kinds
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    local f; f="$(mktemp)"; printf 'jj\n' > "$f"
+    tui_menu_run "t" >/dev/null 2>&1 < "$f"; rm -f "$f"
+    local after_two="$TUI_MENU_CHOICE"
+    _menu_kinds
+    TUI_MENU_GROUP=none; tui_menu_refilter
+    f="$(mktemp)"; printf 'j\n' > "$f"
+    tui_menu_run "t" >/dev/null 2>&1 < "$f"; rm -f "$f"
+    assert_ne "$after_two" "$TUI_MENU_CHOICE"
+}
+
+#[test]
+it_knows_which_keys_only_move_the_cursor() {
+    local k
+    for k in up down home end pgup pgdn '[' ']' ctrl-up shift-down; do
+        assert_ok _tui_menu_is_motion "$k"
+    done
+    for k in enter q '/' '?' a g s f esc space; do
+        assert_fails _tui_menu_is_motion "$k"
+    done
+}
+
+#[test]
+it_hands_back_a_key_it_looked_at_and_did_not_use() {
+    TUI_KEY="enter"
+    tui_key_unread
+    TUI_KEY=""
+    assert_ok tui_key_read
+    assert_eq "$TUI_KEY" "enter"
+}
+
+#[test]
+it_takes_nothing_when_nothing_is_waiting() {
+    # The whole point of the coalescing read: it gives up rather than waiting,
+    # or the loop would block until the next key instead of drawing.
+    assert_fails tui_key_read_now </dev/null
+}
+
+# --- the list is a table -----------------------------------------------------
+#
+# A menu with its own column arithmetic is a menu whose columns line up
+# differently from every other list in the same interface.
+
+_menu_drawn() {
+    local cursor="${1:-1}" cols="${2:-96}"
+    local saved="$TUI_COLS" savedr="$TUI_ROWS"
+    TUI_COLS="$cols"; TUI_ROWS=24
+    local f; f="$(mktemp)"
+    _tui_menu_render "$cursor" 0 10 "t" > "$f" 2>&1
+    _strip < "$f"
+    rm -f "$f"
+    TUI_COLS="$saved"; TUI_ROWS="$savedr"
+}
+_strip() { sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'; }
+
+_menu_rows() {
+    tui_menu_reset
+    TUI_MENU_GROUP=section; TUI_MENU_SORT=declared
+    TUI_MENU_FILTERS=(); TUI_MENU_FILTER_ON=""
+    tui_menu_heading disk
+    tui_menu_entry disk-health "Check disk health" ok  "smart attributes" check
+    tui_menu_entry disk-wipe   "Erase a disk"      off "needs root"       action
+    tui_menu_refilter
+}
+
+#[test]
+it_puts_the_state_in_the_same_column_on_every_row() {
+    # The complaint this answers: a status appended to a label of whatever
+    # length it happened to be is a status nobody finds.
+    _menu_rows
+    local out; out="$(_menu_drawn)"
+    local line; line="$(grep -m1 'Erase a disk' <<<"$out")"
+    local before="${line%%off*}"
+    # The state begins past the name column, not right after the label.
+    assert_ok test "${#before}" -gt "$(( ${#line} > 0 ? 20 : 0 ))"
+}
+
+#[test]
+it_shows_the_note_beside_the_row_and_not_only_under_the_cursor() {
+    # A description you have to move the cursor onto to read is a description
+    # nobody reads while deciding which row to move onto.
+    _menu_rows
+    local out; out="$(_menu_drawn 1)"
+    local line; line="$(grep -m1 'Erase a disk' <<<"$out")"
+    # The cursor is on the other row, so this note is the inline one.
+    assert_contains "$line" "needs root"
+}
+
+#[test]
+it_drops_the_note_before_it_drops_the_name() {
+    # The note repeats below the list, so losing it on a narrow screen costs
+    # nothing. Losing the name would cost the row.
+    _menu_rows
+    local out; out="$(_menu_drawn 1 40)"
+    assert_contains "$out" "Erase a disk"
+    local line; line="$(grep -m1 'Erase a disk' <<<"$out")"
+    assert_fails grep -q 'needs root' <<<"$line"
+}
+
+#[test]
+it_marks_the_row_the_cursor_is_on() {
+    _menu_rows
+    local out; out="$(_menu_drawn 1)"
+    assert_ok grep -qE '^>' <<<"$(grep -m1 'Check disk health' <<<"$out")"
+}
+
+#[test]
+it_does_not_mark_the_rows_it_is_not_on() {
+    _menu_rows
+    local out; out="$(_menu_drawn 1)"
+    assert_fails grep -qE '^>' <<<"$(grep -m1 'Erase a disk' <<<"$out")"
+}
+
+#[test]
+it_draws_a_heading_across_the_row_rather_than_in_a_column() {
+    # A heading labels what follows; it is not a thing with a state.
+    _menu_rows
+    local out; out="$(_menu_drawn)"
+    local line; line="$(grep -m1 'disk$\|disk ' <<<"$out")"
+    assert_contains "$out" "disk"
+}
+
+#[test]
+it_keeps_the_groups_in_the_same_order_whatever_the_sort() {
+    # Sorting orders rows inside a group. Sections that rearrange when the
+    # ordering changes lose the reader's place entirely, and with a state sort
+    # the section order would depend on which group happened to hold the
+    # readiest row, so adding one task would rearrange the screen.
+    local headings_declared headings_name headings_state
+    _menu_kinds; TUI_MENU_GROUP=kind; TUI_MENU_SORT=declared; tui_menu_refilter
+    headings_declared="$(_menu_headings)"
+    _menu_kinds; TUI_MENU_GROUP=kind; TUI_MENU_SORT=name; tui_menu_refilter
+    headings_name="$(_menu_headings)"
+    _menu_kinds; TUI_MENU_GROUP=kind; TUI_MENU_SORT=state; tui_menu_refilter
+    headings_state="$(_menu_headings)"
+    assert_eq "$headings_name"  "$headings_declared"
+    assert_eq "$headings_state" "$headings_declared"
+}
+
+#[test]
+it_still_reorders_the_rows_inside_a_group() {
+    # The control for the test above. Holding the groups still must not stop
+    # the sort doing anything at all.
+    _menu_kinds; TUI_MENU_GROUP=kind; TUI_MENU_SORT=declared; tui_menu_refilter
+    local a; a="$(_menu_shape)"
+    _menu_kinds; TUI_MENU_GROUP=kind; TUI_MENU_SORT=name; tui_menu_refilter
+    local b; b="$(_menu_shape)"
+    assert_ne "$a" "$b"
+}
+
+#[test]
+it_keeps_the_sections_in_the_order_they_were_declared() {
+    _menu_kinds; TUI_MENU_GROUP=section; TUI_MENU_SORT=name; tui_menu_refilter
+    assert_eq "$(_menu_headings)" "disk|net|"
+}
+
+# The headings the reader sees, in order, as one line.
+_menu_headings() {
+    local i out=""
+    for i in "${!TUI_MENU_VIEW[@]}"; do
+        tui_menu_raw "$i" >/dev/null 2>&1 && continue
+        out="${out}$(tui_menu_heading_at "$i")|"
+    done
+    printf '%s' "$out"
+}
+
+#[test]
+it_does_not_draw_the_last_row_as_a_heading_with_no_label() {
+    # `${ARRAY[-1]}` in bash is the last element rather than an error, so an
+    # invented heading with an empty label would silently draw the text of
+    # whichever row happened to be last.
+    _menu_kinds
+    TUI_MENU_VIEW=(-1); TUI_MENU_VHEAD=("")
+    local out; out="$(_tui_menu_cells -1 0 ""; printf '%s' "${_TUI_MENU_CELLS[1]}")"
+    assert_fails grep -q 'apple erase' <<<"$out"
+    assert_fails grep -q 'Beta fix' <<<"$out"
+}
+
+#[test]
+it_still_draws_a_heading_that_has_a_label() {
+    # The control.
+    _menu_kinds
+    _tui_menu_cells -1 0 "somewhere"
+    assert_contains "${_TUI_MENU_CELLS[1]}" "somewhere"
+}
+
+#[test]
+it_says_in_the_readme_as_many_modules_as_it_declares() {
+    # Said wrong twice: eight when there were twelve, then twelve when there
+    # were fourteen. A number in prose has nothing keeping it true, so this is
+    # the thing that keeps it.
+    local root="${BASH_SOURCE[0]%/*}/.."
+    local declared spelled
+    # Only the public ones. The two halves of the menu are marked internal in
+    # `lib.nut`, the way nutshell marks its own impl modules.
+    declared="$(grep '^tui::' "$root/lib.nut" | grep -vc 'internal')"
+    spelled="$(grep -oE '^(Eight|Nine|Ten|Eleven|Twelve|Thirteen|Fourteen|Fifteen|Sixteen) modules' "$root/README.md" | head -1 | cut -d' ' -f1)"
+    local n
+    case "$spelled" in
+        Eight) n=8 ;; Nine) n=9 ;; Ten) n=10 ;; Eleven) n=11 ;; Twelve) n=12 ;;
+        Thirteen) n=13 ;; Fourteen) n=14 ;; Fifteen) n=15 ;; Sixteen) n=16 ;;
+        *) n=0 ;;
+    esac
+    assert_eq "$n" "$declared"
 }

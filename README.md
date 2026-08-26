@@ -61,9 +61,23 @@ for what a colour means rather than for the colour.
 the emacs pairs fold to the same four names.
 
 `tui/menu` is a list with headings the cursor skips and a viewport that keeps the cursor in view.
-`/` searches, over the notes and the ids as well as the titles. It is a mode rather than
-type-to-filter because every letter worth searching for is already a key that means something, and
-`chroot` would quit at the `h`.
+The cursor is a ring: up from the first row is the last. `[` and `]` move by section, and so does a
+modifier with an arrow.
+
+Three things arrange it, and they are three different questions. `g` groups by the section a row was
+declared under, by its kind, or not at all, making its own headings when the cut is not the declared
+one. `s` orders by the caller's own order, by name, or by state with what can be run at the top,
+inside a group and never across it, so the sections do not move when the ordering does. `f` cycles
+the filters a caller registered, which are predicates over a row rather than text: "the ones I can
+run" is not a word that appears in any row.
+
+`/` searches, over the notes and the ids as well as the titles, which is the other half of that
+distinction. It is a mode rather than type-to-filter because every letter worth searching for is
+already a key that means something, and `chroot` would quit at the `h`.
+
+A run of movement is absorbed before it draws. A wheel event becomes a run of arrow keys and a
+velocity scroll becomes a long one, so a list that redraws per key keeps painting for seconds after
+the hand stopped.
 
 `tui/confirm` asks in three strengths: yes or no, a word typed back, and a name typed back. The
 third exists because the failure it defends against is not "did not mean to say yes", it is "meant
