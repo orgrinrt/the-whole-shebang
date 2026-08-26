@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# =============================================================================
+# the-whole-shebang/check - Run the QA checks
+# =============================================================================
+# The gate nutshell and hulilupteri both run on every change. `nut.toml` has
+# carried the thresholds since this repository started and nothing ran them, so
+# the config was decorative: three files were over the limit it sets and the
+# number nobody could see said so.
+#
+# An entry point, so it bootstraps nutshell from the submodule rather than
+# relying on an installed interpreter.
+#
+# Usage:
+#   ./check
+# =============================================================================
+
+set -uo pipefail
+HERE="${BASH_SOURCE[0]%/*}"
+
+if [[ ! -x "$HERE/lib/nutshell/check" ]]; then
+    printf 'nutshell is missing. Run: git submodule update --init\n' >&2
+    exit 1
+fi
+
+exec "$HERE/lib/nutshell/check" "$@"

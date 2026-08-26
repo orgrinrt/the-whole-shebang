@@ -9,6 +9,7 @@ use test
 
 . "${BASH_SOURCE[0]%/*}/../libs/tui/term.sh"
 . "${BASH_SOURCE[0]%/*}/../libs/tui/key.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/layout.sh"
 . "${BASH_SOURCE[0]%/*}/../libs/tui/menu.sh"
 
 # heading, three entries, heading, two entries
@@ -292,4 +293,234 @@ it_resets_the_filter_with_the_menu() {
     tui_menu_reset
     assert_empty "$TUI_MENU_FILTER"
     assert_eq "${#TUI_MENU_VIEW[@]}" "0"
+}
+
+# --- hiding what cannot be run -----------------------------------------------
+#
+# A recovery tool shows a lot of rows that do not apply to the machine it is
+# on. Reading past them to find the three that do is the common case, so there
+# is a key for it; and it is off by default, because a list quietly omitting
+# rows reads as a list with rows missing.
+
+#[test]
+it_shows_everything_by_default() {
+    tui_menu_reset
+    tui_menu_heading "disk"
+    tui_menu_entry a "runnable"     ok
+    tui_menu_entry b "not runnable" off
+    tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "3"
+}
+
+#[test]
+it_hides_the_unavailable_when_asked() {
+    tui_menu_reset
+    tui_menu_heading "disk"
+    tui_menu_entry a "runnable"     ok
+    tui_menu_entry b "not runnable" off
+    TUI_MENU_HIDE_OFF=1
+    tui_menu_refilter
+    # The heading and the one row that can run.
+    assert_eq "${#TUI_MENU_VIEW[@]}" "2"
+    TUI_MENU_HIDE_OFF=0
+}
+
+#[test]
+it_drops_a_heading_whose_rows_all_went() {
+    tui_menu_reset
+    tui_menu_heading "disk"
+    tui_menu_entry a "one" off
+    tui_menu_entry b "two" off
+    tui_menu_heading "boot"
+    tui_menu_entry c "three" ok
+    TUI_MENU_HIDE_OFF=1
+    tui_menu_refilter
+    # An empty section is noise. Only "boot" and its row survive.
+    assert_eq "${#TUI_MENU_VIEW[@]}" "2"
+    TUI_MENU_HIDE_OFF=0
+}
+
+#[test]
+it_keeps_done_rows_when_hiding_the_unavailable() {
+    tui_menu_reset
+    tui_menu_heading "disk"
+    tui_menu_entry a "already true" done
+    tui_menu_entry b "cannot run"   off
+    TUI_MENU_HIDE_OFF=1
+    tui_menu_refilter
+    # "done" is a thing that worked, not a thing that cannot run.
+    assert_eq "${#TUI_MENU_VIEW[@]}" "2"
+    TUI_MENU_HIDE_OFF=0
+}
+
+#[test]
+it_combines_hiding_with_a_search() {
+    tui_menu_reset
+    tui_menu_heading "disk"
+    tui_menu_entry a "wipe a disk"  ok
+    tui_menu_entry b "wipe a stick" off
+    tui_menu_entry c "check a disk" ok
+    TUI_MENU_HIDE_OFF=1
+    TUI_MENU_FILTER="wipe"
+    tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "2"
+    TUI_MENU_HIDE_OFF=0; TUI_MENU_FILTER=""
+}
+
+# --- the keys, listed once ------------------------------------------------------
+
+#[test]
+it_names_every_key_it_answers_to() {
+    local out; out="$(tui_menu_keys)"
+    assert_ok grep -q 'enter' <<<"$out"
+    assert_ok grep -q '/'     <<<"$out"
+    assert_ok grep -q '?'     <<<"$out"
+    assert_ok grep -q 'q'     <<<"$out"
+    assert_ok grep -q '^a'    <<<"$out"
+}
+
+#[test]
+it_describes_every_key_it_lists() {
+    # A key with no description is a key nobody learns.
+    local key what bad=""
+    while IFS=$'\t' read -r key what; do
+        [[ -n "$key" ]] || continue
+        [[ -n "$what" ]] || bad+="${key} "
+    done < <(tui_menu_keys)
+    assert_empty "$bad"
+}
+
+#[test]
+it_lists_a_key_for_everything_the_loop_handles() {
+    # The list and the loop drifting apart is how a key becomes undiscoverable.
+    local src listed
+    src="$(cat "${BASH_SOURCE[0]%/*}/../libs/tui/menu.sh")"
+    listed="$(tui_menu_keys | cut -f1)"
+    # Every single-character key the loop tests for has to appear in the list.
+    local k bad=""
+    for k in '/' '?' 'a'; do
+        grep -qF "\"\$TUI_KEY\" == \"$k\"" <<<"$src" || continue
+        grep -qF "$k" <<<"$listed" || bad+="${k} "
+    done
+    assert_empty "$bad"
+}
+
+# --- the panel on the right ------------------------------------------------------
+#
+# A wide terminal has room beside the list; a tall narrow one does not, and
+# squeezing a panel into it costs the labels their width for nothing. The
+# decision is the layout's, so it can be checked at widths without a terminal.
+
+#[test]
+it_shows_no_panel_when_nothing_was_added() {
+    tui_menu_reset
+    TUI_COLS=200
+    assert_eq "$(_tui_menu_aside_width)" "0"
+}
+
+#[test]
+it_shows_a_panel_on_a_wide_terminal() {
+    tui_menu_reset
+    tui_menu_aside "running from" "host"
+    TUI_COLS=140
+    assert_ok test "$(_tui_menu_aside_width)" -gt 0
+}
+
+#[test]
+it_shows_no_panel_on_a_narrow_terminal() {
+    tui_menu_reset
+    tui_menu_aside "running from" "host"
+    local c
+    for c in 40 60 70; do
+        TUI_COLS=$c
+        # The list needs its width first. A panel here would take it.
+        assert_eq "$(_tui_menu_aside_width)" "0"
+    done
+}
+
+#[test]
+it_never_gives_the_panel_room_the_list_needs() {
+    tui_menu_reset
+    tui_menu_aside "a" "b"
+    local c w shown=0
+    for c in 72 80 100 120 160 200; do
+        TUI_COLS=$c
+        w="$(_tui_menu_aside_width)"
+        (( w == 0 )) && continue
+        shown=1
+        assert_ok test $(( c - w - 2 )) -ge 46
+    done
+    # Or the loop asserted nothing at all, which is how this first passed.
+    assert_eq "$shown" "1"
+}
+
+#[test]
+it_shows_no_panel_when_there_is_nothing_to_lay_one_out_with() {
+    # menu works without layout loaded. Without it there is no way to know
+    # whether a panel would fit, and guessing is how the list gets squeezed.
+    local out
+    out="$(bash -c '
+        cd '"$PWD"'
+        . lib/nutshell/init; . libs/tui/term.sh; . libs/tui/menu.sh
+        tui_menu_reset; tui_menu_aside a b
+        TUI_COLS=200; _tui_menu_aside_width')"
+    assert_eq "$out" "0"
+}
+
+#[test]
+it_holds_the_lines_it_was_given() {
+    tui_menu_reset
+    tui_menu_aside "running from" "host"
+    tui_menu_aside "stick"        "not mounted"
+    assert_eq "${#TUI_MENU_ASIDE[@]}" "2"
+    assert_ok grep -q 'running from' <<<"${TUI_MENU_ASIDE[0]}"
+    assert_ok grep -q 'host'         <<<"${TUI_MENU_ASIDE[0]}"
+}
+
+#[test]
+it_takes_a_label_with_no_value_as_a_heading() {
+    tui_menu_reset
+    tui_menu_aside "Machine"
+    assert_eq "${TUI_MENU_ASIDE[0]}" "$(printf 'Machine\t')"
+}
+
+#[test]
+it_forgets_the_panel_on_reset() {
+    tui_menu_reset
+    tui_menu_aside "a" "b"
+    tui_menu_reset
+    assert_eq "${#TUI_MENU_ASIDE[@]}" "0"
+}
+
+#[test]
+it_finds_a_row_by_the_name_it_is_called_by() {
+    tui_menu_reset
+    tui_menu_heading install
+    tui_menu_entry iso-fetch     "Put an install image on the stick" ok
+    tui_menu_entry stick-refresh "Freshen the stick from this machine" ok
+    # The id is what a row is called everywhere else: it is what the command
+    # line takes and what somebody has in their head. Searching `fe` for
+    # `iso-fetch` found nothing, because only the label was searched.
+    TUI_MENU_FILTER="fe"
+    tui_menu_refilter
+    local found=""
+    local i
+    for i in "${TUI_MENU_VIEW[@]}"; do
+        [[ "${TUI_MENU_STATE[$i]}" == "heading" ]] && continue
+        found="${found}${TUI_MENU_ID[$i]} "
+    done
+    assert_eq "$found" "iso-fetch "
+    TUI_MENU_FILTER=""
+}
+
+#[test]
+it_still_finds_a_row_by_its_label_and_its_note() {
+    tui_menu_reset
+    tui_menu_heading install
+    tui_menu_entry aaa "Put an install image on the stick" ok "needs the network"
+    TUI_MENU_FILTER="image"; tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "2"
+    TUI_MENU_FILTER="network"; tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "2"
+    TUI_MENU_FILTER=""
 }

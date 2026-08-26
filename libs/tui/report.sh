@@ -18,8 +18,8 @@
 # not knowing there were four problems until after reading past all of them.
 #
 # Usage:
-#   use shebang::tui/term
-#   use shebang::tui/report
+#   use shebang::tui::term
+#   use shebang::tui::report
 #
 #   tui_report_reset
 #   tui_report_row ok   "disk health"   "no reallocated sectors"

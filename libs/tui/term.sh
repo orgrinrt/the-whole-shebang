@@ -25,7 +25,7 @@
 # dead shell behind is a tool nobody starts a second time.
 #
 # Usage:
-#   use shebang::tui/term
+#   use shebang::tui::term
 #
 #   tui_begin                  # alt screen, cursor away, traps armed
 #   tui_move 3 1; printf 'hello'
@@ -76,6 +76,7 @@ tui_probe() {
         TUI_COLOR=0
     fi
     tui_size
+    tui_palette
 }
 
 #[pub]
@@ -236,6 +237,58 @@ tui_suspend() {
         tui_clear
     fi
     return $rc
+}
+
+# -----------------------------------------------------------------------------
+# Colour, by meaning
+# -----------------------------------------------------------------------------
+#
+# Named for what a thing is, not for what colour it happens to be. A screen
+# where "done" is plain and "press any key" is blue is a screen where colour
+# carries no information: the eye learns there is nothing to find and stops
+# looking. So every module colours the same kind of thing the same way, and
+# anything colourless is colourless on purpose.
+#
+# All empty when the terminal said no colour, so a caller never has to ask.
+
+declare -g TUI_C_OK="" TUI_C_WARN="" TUI_C_BAD="" TUI_C_OFF=""
+declare -g TUI_C_KEY="" TUI_C_HEAD="" TUI_C_MUTE="" TUI_C_SEL="" TUI_C_OFFTXT=""
+declare -g TUI_C_END=""
+
+#[pub]
+# Fill the palette from the colour library, gated on what the terminal said.
+# Called by tui_probe; call it again if the colour variables change under you.
+# Usage: tui_palette
+tui_palette() {
+    if (( ${TUI_COLOR:-0} == 1 )); then
+        TUI_C_OK="${GREEN:-}"          # already true, finished, healthy
+        TUI_C_WARN="${YELLOW:-}"       # worth a look
+        TUI_C_BAD="${RED:-}"           # broken, or about to destroy something
+        TUI_C_OFF="${DIM:-}"           # unavailable, and why
+        TUI_C_KEY="${CYAN:-}"          # a key to press
+        TUI_C_HEAD="${BOLD:-}"         # a heading
+        TUI_C_MUTE="${DIM:-}"          # secondary text that is still meant to be read
+        TUI_C_SEL="${BOLD:-}"          # the row under the cursor
+        TUI_C_OFFTXT="${DIM:-}"
+        TUI_C_END="${NC:-}"
+    else
+        TUI_C_OK=""; TUI_C_WARN=""; TUI_C_BAD=""; TUI_C_OFF=""
+        TUI_C_KEY=""; TUI_C_HEAD=""; TUI_C_MUTE=""; TUI_C_SEL=""; TUI_C_OFFTXT=""
+        TUI_C_END=""
+    fi
+}
+
+#[pub]
+# The colour for a state word: ok, done, warn, fail, off, skip.
+# Usage: printf '%s%s%s' "$(tui_state_colour done)" "done" "$TUI_C_END"
+tui_state_colour() {
+    case "$1" in
+        ok|done|good|yes)    printf '%s' "$TUI_C_OK" ;;
+        warn|maybe)          printf '%s' "$TUI_C_WARN" ;;
+        fail|bad|no|blocked) printf '%s' "$TUI_C_BAD" ;;
+        off|skip|na)         printf '%s' "$TUI_C_OFF" ;;
+        *)                   printf '' ;;
+    esac
 }
 
 # -----------------------------------------------------------------------------

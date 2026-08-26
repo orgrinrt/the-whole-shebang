@@ -23,7 +23,7 @@
 # back to the menu.
 #
 # Usage:
-#   use shebang::tui/run
+#   use shebang::tui::run
 #
 #   tui_run "Rebuilding the initramfs" mkinitcpio -P
 #   tui_run_quiet "Probing disks" smartctl --scan     # no pause when it works

@@ -19,8 +19,8 @@
 # writes a control byte when there is nowhere to write one.
 #
 # Usage:
-#   use shebang::tui/term
-#   use shebang::tui/frame
+#   use shebang::tui::term
+#   use shebang::tui::frame
 #
 #   tui_frame_open "Checking the disk"
 #   tui_frame_say "smart says the drive is fine"
