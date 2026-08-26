@@ -223,7 +223,7 @@ it_never_draws_wider_than_the_terminal() {
     local c out w
     for c in 5 10 15 20 24 40 80 120; do
         out="$(WANT_COLS=$c PROOT="$PROOT" bash -c '
-            . "$PROOT/lib/nutshell/init" 2>/dev/null
+            . "$NUTSHELL_INIT" 2>/dev/null
             . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
             # After sourcing: term.sh declares TUI_COLS at file scope, so a
             # value inherited from the environment is overwritten by the
@@ -246,7 +246,7 @@ it_never_draws_wider_than_the_terminal() {
 it_draws_a_spinner_when_the_size_is_unknown() {
     local out
     out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$NUTSHELL_INIT" 2>/dev/null
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 0 "Scanning"
@@ -262,7 +262,7 @@ it_draws_a_spinner_when_the_size_is_unknown() {
 it_cuts_a_long_label_with_a_mark_the_terminal_can_draw() {
     local out
     out="$(LC_ALL=C LANG=C WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$NUTSHELL_INIT" 2>/dev/null
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 10 "T"
@@ -278,7 +278,7 @@ it_cuts_a_long_label_with_a_mark_the_terminal_can_draw() {
 it_uses_the_nicer_mark_where_it_renders() {
     local out
     out="$(LC_ALL=en_US.UTF-8 TERM=xterm WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$NUTSHELL_INIT" 2>/dev/null
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 10 "T"
@@ -291,7 +291,7 @@ it_uses_the_nicer_mark_where_it_renders() {
 it_keeps_the_percentage_when_there_is_no_room_for_a_bar() {
     local out
     out="$(WANT_COLS=12 PROOT="$PROOT" bash -c '
-        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$NUTSHELL_INIT" 2>/dev/null
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 4 "T"
@@ -306,7 +306,7 @@ it_keeps_the_percentage_when_there_is_no_room_for_a_bar() {
 it_writes_no_colour_when_the_terminal_said_no_colour() {
     local out
     out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$NUTSHELL_INIT" 2>/dev/null
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         DIM=$'"'"'\033[2m'"'"'; BOLD=$'"'"'\033[1m'"'"'; GREEN=$'"'"'\033[32m'"'"'; NC=$'"'"'\033[0m'"'"'
         TUI_TTY=1; TUI_COLOR=0; TUI_COLS="${WANT_COLS}"
@@ -324,7 +324,7 @@ it_writes_no_colour_when_the_terminal_said_no_colour() {
 it_writes_colour_when_the_terminal_wants_it() {
     local out
     out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$NUTSHELL_INIT" 2>/dev/null
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         DIM=$'"'"'\033[2m'"'"'; BOLD=$'"'"'\033[1m'"'"'; GREEN=$'"'"'\033[32m'"'"'; NC=$'"'"'\033[0m'"'"'
         TUI_TTY=1; TUI_COLOR=1; TUI_COLS="${WANT_COLS}"
@@ -338,7 +338,7 @@ it_writes_colour_when_the_terminal_wants_it() {
 it_says_how_long_it_took() {
     local out
     out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$NUTSHELL_INIT" 2>/dev/null
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 1 "T"; tui_progress_step a; tui_progress_close
@@ -401,4 +401,139 @@ it_ignores_a_failure_with_no_run_open() {
     TUI_TTY=0
     local out; out="$(tui_progress_fail "orphan")"
     assert_eq "$out" ""
+}
+
+# --- counting in bytes ---------------------------------------------------------
+#
+# A transfer is progress whose size is known and whose position can be
+# measured, so it belongs here. What it is not is a step count: a finished
+# image closed with `done 1236641792 in 412s`, which is the byte total read
+# out as a tally of things done.
+
+#[test]
+it_reads_a_byte_count_the_way_somebody_does() {
+    assert_eq "$(tui_bytes 0)"          "0 B"
+    assert_eq "$(tui_bytes 1)"          "1 B"
+    assert_eq "$(tui_bytes 1023)"       "1023 B"
+    assert_eq "$(tui_bytes 1024)"       "1 KiB"
+    assert_eq "$(tui_bytes 1048575)"    "1023 KiB"
+    assert_eq "$(tui_bytes 1048576)"    "1 MiB"
+    assert_eq "$(tui_bytes 1073741823)" "1023 MiB"
+    assert_eq "$(tui_bytes 1073741824)" "1.0 GiB"
+    assert_eq "$(tui_bytes 1236641792)" "1.1 GiB"
+    # The disk sizes this is actually reached for. Stopping at GiB reported a
+    # two terabyte drive as `2048.0 GiB`.
+    assert_eq "$(tui_bytes 1099511627775)" "1023.9 GiB"
+    assert_eq "$(tui_bytes 1099511627776)" "1.0 TiB"
+    assert_eq "$(tui_bytes 2199023255552)" "2.0 TiB"
+}
+
+#[test]
+it_treats_a_count_that_is_not_a_number_as_nothing() {
+    # The size comes from `stat` on a file that may not exist yet, so this
+    # gets an empty string in the ordinary course of things.
+    assert_eq "$(tui_bytes "")"      "0 B"
+    assert_eq "$(tui_bytes "nope")"  "0 B"
+    assert_eq "$(tui_bytes "-5")"    "0 B"
+}
+
+#[test]
+it_closes_a_byte_run_with_a_size_rather_than_a_tally() {
+    local out
+    out="$(tui_progress_open 1236641792 "" bytes
+           tui_progress_set 1236641792
+           tui_progress_close)"
+    assert_contains "$out" "1.1 GiB"
+    # The number itself is what used to land there, read out as a tally of
+    # things done.
+    assert_fails grep -q '1236641792' <<<"$out"
+}
+
+#[test]
+it_closes_a_step_run_with_a_tally_as_it_always_did() {
+    local out
+    out="$(tui_progress_open 14 ""; tui_progress_step a; tui_progress_close)"
+    assert_contains "$out" "done, 1 in"
+}
+
+#[test]
+it_logs_a_byte_run_in_sizes_when_there_is_no_terminal() {
+    local out
+    out="$(tui_progress_open 1048576 "" bytes; tui_progress_set 524288 "half")"
+    assert_contains "$out" "512 KiB"
+    assert_contains "$out" "1 MiB"
+    assert_fails grep -q '524288' <<<"$out"
+}
+
+#[test]
+it_takes_anything_that_is_not_bytes_as_steps() {
+    # A bar that refused to draw over a misspelled unit would be worse than
+    # one that counts.
+    local out
+    out="$(tui_progress_open 1048576 "" "Bytes"; tui_progress_set 524288; tui_progress_close)"
+    assert_contains "$out" "524288"
+}
+
+#[test]
+it_forgets_the_unit_of_the_previous_run() {
+    local out
+    tui_progress_open 1024 "" bytes >/dev/null; tui_progress_close >/dev/null
+    out="$(tui_progress_open 10 ""; tui_progress_set 4; tui_progress_close)"
+    assert_contains "$out" "done, 4 in"
+    assert_fails grep -q 'KiB' <<<"$out"
+}
+
+# --- stopping, which is not finishing ------------------------------------------
+
+#[test]
+it_says_stopped_rather_than_done_when_a_run_gives_up() {
+    local out
+    out="$(tui_progress_open 1048576 "" bytes; tui_progress_set 262144; tui_progress_stop "the connection went")"
+    # `done` on a transfer that failed is the bar telling the reader the
+    # opposite of what happened.
+    assert_fails grep -q 'done' <<<"$out"
+    assert_contains "$out" "stopped at 256 KiB"
+    assert_contains "$out" "the connection went"
+}
+
+#[test]
+it_ignores_a_stop_with_no_run_open() {
+    tui_progress_open 4 "" >/dev/null; tui_progress_close >/dev/null
+    assert_empty "$(tui_progress_stop "nothing is open")"
+}
+
+#[test]
+it_will_not_close_a_run_it_already_stopped() {
+    local out
+    out="$(tui_progress_open 4 ""; tui_progress_stop "gave up"; tui_progress_close)"
+    assert_contains "$out" "stopped"
+    assert_fails grep -q 'done' <<<"$out"
+}
+
+#[test]
+it_does_not_close_a_byte_run_as_done_when_a_step_failed() {
+    # `tui_progress_fail` is one step of many failing, not the run giving up.
+    # In a byte run it adds a byte to the transfer and reports a step tally,
+    # and the run is still open afterwards. The header used to teach this call
+    # for a failed transfer, which is the call that defeats the feature.
+    local out
+    out="$(tui_progress_open 1048576 "" bytes
+           tui_progress_set 524288
+           tui_progress_fail "the transfer stopped"
+           tui_progress_close)"
+    # It counted a step, so the byte count moved by one.
+    assert_contains "$out" "1 failed"
+    # And this is what the header was teaching: it still says done.
+    assert_contains "$out" "done"
+}
+
+#[test]
+it_says_stopped_for_the_same_case_the_header_now_shows() {
+    local out
+    out="$(tui_progress_open 1048576 "" bytes
+           tui_progress_set 524288
+           tui_progress_stop "the transfer stopped")"
+    assert_contains "$out" "stopped at 512 KiB"
+    assert_fails grep -q 'done' <<<"$out"
+    assert_fails grep -q 'failed' <<<"$out"
 }

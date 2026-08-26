@@ -15,7 +15,7 @@ description = "Standalone bash libraries built on nutshell, each taken on its ow
 
 [paths]
 lib_dir = "libs"
-exclude = [".git", "lib/nutshell", "node_modules", "vendor", "target", "dist", "build"]
+exclude = [".git", "lib/find-nutshell", "node_modules", "vendor", "target", "dist", "build"]
 include = ["*.sh", "test"]
 
 [annotations]

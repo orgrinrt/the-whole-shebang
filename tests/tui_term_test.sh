@@ -278,7 +278,7 @@ it_knows_about_the_terminal_without_being_asked_first() {
 import pty, os, sys
 root = sys.argv[1]
 script = (
-    'cd %s; . lib/nutshell/init; . libs/tui/term.sh; . libs/tui/report.sh; '
+    'cd %s; . "$NUTSHELL_INIT"; . libs/tui/term.sh; . libs/tui/report.sh; '
     'tui_report_reset; tui_report_row fail a b; '
     'printf "escapes:%%d\\n" "$(tui_report_show T | grep -c $\'\\x1b\')"' % root
 )
@@ -296,7 +296,7 @@ it_still_writes_no_colour_into_a_pipe() {
     # The other direction of the same flag, and the one that matters for a log.
     local out
     out="$(cd "$TROOT" && bash -c '
-        . lib/nutshell/init; . libs/tui/term.sh; . libs/tui/report.sh
+        . "$NUTSHELL_INIT"; . libs/tui/term.sh; . libs/tui/report.sh
         tui_report_reset; tui_report_row fail a b
         tui_report_show T')"
     assert_fails grep -q $'\x1b' <<<"$out"
