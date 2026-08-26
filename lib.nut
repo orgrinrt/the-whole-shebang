@@ -15,4 +15,5 @@ tui::plan                libs/tui/plan.sh
 tui::progress            libs/tui/progress.sh
 tui::report              libs/tui/report.sh
 tui::run                 libs/tui/run.sh
+tui::table               libs/tui/table.sh
 tui::term                libs/tui/term.sh
