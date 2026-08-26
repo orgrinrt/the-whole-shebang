@@ -200,6 +200,12 @@ it_jumps_to_a_count_for_work_finished_in_batches() {
 # there. What was easy to test got tested.
 
 _pstrip() { sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'; }
+
+# Absolute. Relative paths inside `bash -c` resolve against the caller's
+# directory, so run from anywhere but the repo root these sourced nothing at
+# all -- and the test asserting no colour then passed because there was no
+# module loaded to produce any.
+PROOT="$(cd "${BASH_SOURCE[0]%/*}/.." && pwd)"
 # The widest line actually drawn, in characters, with the carriage returns that
 # separate redraws turned into line breaks.
 _pwidest() {
@@ -216,9 +222,9 @@ it_never_draws_wider_than_the_terminal() {
     TUI_TTY=1
     local c out w
     for c in 5 10 15 20 24 40 80 120; do
-        out="$(WANT_COLS=$c bash -c '
-            . lib/nutshell/init 2>/dev/null
-            . libs/tui/term.sh; . libs/tui/progress.sh
+        out="$(WANT_COLS=$c PROOT="$PROOT" bash -c '
+            . "$PROOT/lib/nutshell/init" 2>/dev/null
+            . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
             # After sourcing: term.sh declares TUI_COLS at file scope, so a
             # value inherited from the environment is overwritten by the
             # default the moment the module loads.
@@ -239,9 +245,9 @@ it_never_draws_wider_than_the_terminal() {
 #[test]
 it_draws_a_spinner_when_the_size_is_unknown() {
     local out
-    out="$(WANT_COLS=40 bash -c '
-        . lib/nutshell/init 2>/dev/null
-        . libs/tui/term.sh; . libs/tui/progress.sh
+    out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
+        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 0 "Scanning"
         tui_progress_step one; tui_progress_step two
@@ -255,9 +261,9 @@ it_draws_a_spinner_when_the_size_is_unknown() {
 #[test]
 it_cuts_a_long_label_with_a_mark_the_terminal_can_draw() {
     local out
-    out="$(LC_ALL=C LANG=C WANT_COLS=40 bash -c '
-        . lib/nutshell/init 2>/dev/null
-        . libs/tui/term.sh; . libs/tui/progress.sh
+    out="$(LC_ALL=C LANG=C WANT_COLS=40 PROOT="$PROOT" bash -c '
+        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 10 "T"
         tui_progress_step "a label far longer than the space left for it on this line"
@@ -271,9 +277,9 @@ it_cuts_a_long_label_with_a_mark_the_terminal_can_draw() {
 #[test]
 it_uses_the_nicer_mark_where_it_renders() {
     local out
-    out="$(LC_ALL=en_US.UTF-8 TERM=xterm WANT_COLS=40 bash -c '
-        . lib/nutshell/init 2>/dev/null
-        . libs/tui/term.sh; . libs/tui/progress.sh
+    out="$(LC_ALL=en_US.UTF-8 TERM=xterm WANT_COLS=40 PROOT="$PROOT" bash -c '
+        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 10 "T"
         tui_progress_step "a label far longer than the space left for it on this line"
@@ -284,9 +290,9 @@ it_uses_the_nicer_mark_where_it_renders() {
 #[test]
 it_keeps_the_percentage_when_there_is_no_room_for_a_bar() {
     local out
-    out="$(WANT_COLS=12 bash -c '
-        . lib/nutshell/init 2>/dev/null
-        . libs/tui/term.sh; . libs/tui/progress.sh
+    out="$(WANT_COLS=12 PROOT="$PROOT" bash -c '
+        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 4 "T"
         tui_progress_step one; tui_progress_step two
@@ -299,13 +305,16 @@ it_keeps_the_percentage_when_there_is_no_room_for_a_bar() {
 #[test]
 it_writes_no_colour_when_the_terminal_said_no_colour() {
     local out
-    out="$(WANT_COLS=40 bash -c '
-        . lib/nutshell/init 2>/dev/null
-        . libs/tui/term.sh; . libs/tui/progress.sh
+    out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
+        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         DIM=$'"'"'\033[2m'"'"'; BOLD=$'"'"'\033[1m'"'"'; GREEN=$'"'"'\033[32m'"'"'; NC=$'"'"'\033[0m'"'"'
         TUI_TTY=1; TUI_COLOR=0; TUI_COLS="${WANT_COLS}"
         tui_progress_open 2 "T"; tui_progress_step a; tui_progress_close
     ' 2>&1)"
+    # The module has to have loaded, or "no colour" is true of an empty
+    # string and this test passes having run nothing.
+    assert_ok grep -q 'done' <<<"$out"
     # Not "no escapes at all": clearing the line is terminal control and is
     # right even with colour off. What must be absent is the colour itself.
     assert_fails grep -qE $'\x1b\[[0-9;]*m' <<<"$out"
@@ -314,9 +323,9 @@ it_writes_no_colour_when_the_terminal_said_no_colour() {
 #[test]
 it_writes_colour_when_the_terminal_wants_it() {
     local out
-    out="$(WANT_COLS=40 bash -c '
-        . lib/nutshell/init 2>/dev/null
-        . libs/tui/term.sh; . libs/tui/progress.sh
+    out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
+        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         DIM=$'"'"'\033[2m'"'"'; BOLD=$'"'"'\033[1m'"'"'; GREEN=$'"'"'\033[32m'"'"'; NC=$'"'"'\033[0m'"'"'
         TUI_TTY=1; TUI_COLOR=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 2 "T"; tui_progress_step a; tui_progress_close
@@ -328,9 +337,9 @@ it_writes_colour_when_the_terminal_wants_it() {
 #[test]
 it_says_how_long_it_took() {
     local out
-    out="$(WANT_COLS=40 bash -c '
-        . lib/nutshell/init 2>/dev/null
-        . libs/tui/term.sh; . libs/tui/progress.sh
+    out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
+        . "$PROOT/lib/nutshell/init" 2>/dev/null
+        . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 1 "T"; tui_progress_step a; tui_progress_close
     ' 2>&1 | _pstrip)"

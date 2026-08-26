@@ -298,12 +298,21 @@ it_survives_a_frame_opened_before_the_terminal_was_probed() {
 
 #[test]
 it_has_usable_glyphs_before_anything_opens_a_frame() {
-    # Not "they are set" -- that a line can be drawn without a frame ever
-    # having been opened, which is what the crash actually needed.
+    # Reading them, not drawing with them. The first version of this test never
+    # opened a frame, so it never reached a glyph, and it passed against the
+    # code that crashed -- which makes it a test of nothing.
     local out
-    out="$(set -u; tui_frame_say "no frame here" 2>&1)"
-    assert_ok    grep -q 'no frame here' <<<"$out"
-    assert_fails grep -q 'unbound'       <<<"$out"
+    out="$(set -u
+        . "${BASH_SOURCE[0]%/*}/../lib/nutshell/init"
+        . "${BASH_SOURCE[0]%/*}/../libs/tui/term.sh"
+        . "${BASH_SOURCE[0]%/*}/../libs/tui/frame.sh"
+        printf 'v=[%s] h=[%s] tl=[%s] ell=[%s]\n' \
+            "$_TUI_F_V" "$_TUI_F_H" "$_TUI_F_TL" "$_TUI_F_ELL"
+    2>&1)"
+    assert_fails grep -q 'unbound' <<<"$out"
+    assert_fails grep -q 'v=\[\]'  <<<"$out"
+    assert_fails grep -q 'h=\[\]'  <<<"$out"
+    assert_ok    grep -q 'ell='    <<<"$out"
 }
 
 # --- cutting a line, in the locale the fallback exists for -----------------------

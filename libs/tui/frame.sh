@@ -82,16 +82,9 @@ _tui_frame_glyphs() {
     fi
 }
 
-# A locale that is not UTF-8 renders the box characters as several bytes of
-# nonsense, and the linux console before a font is loaded is the usual place
-# that happens -- which is to say, exactly where this tool gets used.
-_tui_frame_unicode_ok() {
-    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
-        *UTF-8*|*utf8*|*UTF8*|*utf-8*) ;;
-        *) return 1 ;;
-    esac
-    [[ "${TERM:-}" != "linux" ]]
-}
+# The locale question itself is term.sh's, since progress needs the same
+# answer and two copies of a rule are two rules.
+_tui_frame_unicode_ok() { tui_unicode_ok; }
 
 # Styling, but only when the terminal said so. term.sh probes it; nutshell's
 # colour module decides separately, at source time, by a different rule. Two
@@ -136,34 +129,13 @@ _tui_frame_rep() {
 # this is for, and worth knowing before relying on it elsewhere.
 # Usage: tui_frame_vis <text> -> a number
 tui_frame_vis() {
-    local s="$1"
-    s="${s//$'\033'\[/$'\033'}"          # cheap first pass, no fork
+    local s
+    # One pass, and it forks. An earlier version did a substitution first and
+    # then threw the result away by recomputing from the argument, under a
+    # comment saying it avoided the fork -- the exact shape this module was
+    # rewritten to remove.
     s="$(printf '%s' "$1" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' 2>/dev/null)" || s="$1"
     printf '%d' "${#s}"
-}
-
-# A string cut to n characters with the mark on the end, without splitting a
-# character in half. In a non-UTF-8 locale bash indexes bytes, so a plain cut
-# can leave a lone lead byte -- which is the corruption the ASCII fallback
-# exists to avoid, arriving by another door.
-_tui_frame_cut() {
-    local s="$1" n="$2" mark="$_TUI_F_ELL" keep
-    (( n <= 0 )) && { printf ''; return 0; }
-    keep=$(( n - ${#mark} ))
-    (( keep < 0 )) && keep=0
-    s="${s:0:$keep}"
-    # Drop a trailing partial sequence: any run of continuation bytes, and then
-    # a lead byte with nothing after it.
-    if ! _tui_frame_unicode_ok; then
-        while [[ -n "$s" ]] && LC_ALL=C grep -q $'[\xc0-\xff][\x80-\xbf]\{0,2\}$' <<<"$s" 2>/dev/null; do
-            local last="${s: -1}"
-            case "$last" in
-                [$'\x80'-$'\xbf']) s="${s%?}" ;;
-                *) s="${s%?}"; break ;;
-            esac
-        done
-    fi
-    printf '%s%s' "$s" "$mark"
 }
 
 #[pub]
@@ -229,7 +201,7 @@ _tui_frame_row() {
     (( inner < 1 )) && inner=1
     len="$(tui_frame_vis "$text")"
     if (( len > inner )); then
-        text="$(_tui_frame_cut "$text" "$inner")"
+        text="$(tui_cut "$text" "$inner" "$_TUI_F_ELL")"
         len="$(tui_frame_vis "$text")"
     fi
     pad="$(_tui_frame_rep " " $(( inner - len )))"

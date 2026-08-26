@@ -237,3 +237,89 @@ tui_suspend() {
     fi
     return $rc
 }
+
+# -----------------------------------------------------------------------------
+# Cutting text to fit
+# -----------------------------------------------------------------------------
+
+#[pub]
+# Can this terminal draw characters outside ASCII? A locale that is not UTF-8
+# renders them as several bytes of nonsense, and the linux console before a font
+# is loaded is the usual place that happens.
+# Usage: tui_unicode_ok && ...
+tui_unicode_ok() {
+    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+        *UTF-8*|*utf8*|*UTF8*|*utf-8*) ;;
+        *) return 1 ;;
+    esac
+    [[ "${TERM:-}" != "linux" ]]
+}
+
+#[pub]
+# The mark to end a line that had to be cut, in whatever this terminal can
+# draw. An ellipsis is three bytes of UTF-8, so on a console that cannot render
+# it the nicer mark is the corruption the ASCII fallback exists to avoid.
+# Usage: tui_ellipsis -> "…" or "..."
+tui_ellipsis() {
+    if tui_unicode_ok; then printf '\u2026'; else printf '...'; fi
+}
+
+# The length in bytes of the character a lead byte begins, or 0 if the byte is
+# not a lead byte. Read under LC_ALL=C, where bash indexes bytes.
+_tui_lead_len() {
+    local n="$1"
+    if   (( n >= 240 && n <= 247 )); then printf '4'
+    elif (( n >= 224 && n <= 239 )); then printf '3'
+    elif (( n >= 192 && n <= 223 )); then printf '2'
+    else printf '0'; fi
+}
+
+#[pub]
+# A string cut to n characters with the mark on the end.
+#
+# In a non-UTF-8 locale bash indexes bytes, so a plain cut can land inside a
+# character and leave a lone lead byte on screen -- which is the corruption the
+# ASCII fallback exists to prevent, arriving by another door. Only a sequence
+# that is actually incomplete is removed: an earlier version stripped whole
+# characters that were never split.
+# Usage: tui_cut <text> <n> [mark] -> the cut string
+tui_cut() {
+    local s="$1" n="$2" mark="${3:-$(tui_ellipsis)}" keep
+    [[ "$n" =~ ^-?[0-9]+$ ]] || n=0
+    (( n <= 0 )) && { printf ''; return 0; }
+    (( ${#s} <= n )) && { printf '%s' "$s"; return 0; }
+
+    keep=$(( n - ${#mark} ))
+    (( keep < 0 )) && keep=0
+    s="${s:0:$keep}"
+
+    if ! tui_unicode_ok; then
+        local i cont=0 b code want
+        # Walk back over trailing continuation bytes, then look at the byte in
+        # front of them. The sequence is incomplete only when that lead byte
+        # wanted more bytes than are present.
+        for (( i = ${#s}; i > 0; i-- )); do
+            b="${s:i-1:1}"
+            printf -v code '%d' "'$b" 2>/dev/null || code=0
+            (( code < 0 )) && code=$(( code + 256 ))
+            if (( code >= 128 && code <= 191 )); then cont=$(( cont + 1 )); continue; fi
+            want="$(_tui_lead_len "$code")"
+            if (( want > 0 && want > cont + 1 )); then
+                s="${s:0:i-1}"          # a real partial sequence: drop it whole
+            fi
+            break
+        done
+    fi
+    printf '%s%s' "$s" "$mark"
+}
+
+# -----------------------------------------------------------------------------
+# Probed once, here
+# -----------------------------------------------------------------------------
+#
+# TUI_TTY and TUI_COLOR used to stay at their defaults until tui_begin ran, and
+# a module that gates its colour on TUI_COLOR then printed none at all for a
+# caller that sources it and calls it -- which is what every usage header in
+# this collection shows. Probing at load makes the flags mean something from
+# the first line, and tui_probe stays callable for a size that changed.
+tui_probe 2>/dev/null || true

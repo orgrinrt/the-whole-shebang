@@ -58,15 +58,7 @@ _TUI_PROG_SPINNER='|/-\'
 # this is aimed at that renders as noise.
 declare -g _TUI_PROG_ELL="..."
 
-_tui_progress_marks() {
-    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
-        *UTF-8*|*utf8*|*UTF8*|*utf-8*)
-            if [[ "${TERM:-}" != "linux" ]]; then
-                printf -v _TUI_PROG_ELL '%b' '\u2026'; return 0
-            fi ;;
-    esac
-    _TUI_PROG_ELL="..."
-}
+_tui_progress_marks() { _TUI_PROG_ELL="$(tui_ellipsis)"; }
 
 # Styling, but only when the terminal said so, so that this module and term.sh
 # agree about one session rather than two libraries deciding separately.
@@ -223,12 +215,11 @@ _tui_progress_draw() {
 
 # A label cut to fit. Left as it is when it fits, which is almost always.
 _tui_progress_fit() {
-    local s="${1:-}" n="${2:-0}" keep
+    local s="${1:-}" n="${2:-0}"
     (( n < 4 )) && { printf ''; return 0; }
-    (( ${#s} <= n )) && { printf '%s' "$s"; return 0; }
-    keep=$(( n - ${#_TUI_PROG_ELL} ))
-    (( keep < 0 )) && keep=0
-    printf '%s%s' "${s:0:$keep}" "$_TUI_PROG_ELL"
+    # The shared cut, which knows not to leave half a character behind. This
+    # was a second copy of frame's truncation and kept the bug frame had.
+    tui_cut "$s" "$n" "$_TUI_PROG_ELL"
 }
 
 #[pub]

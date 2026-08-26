@@ -192,3 +192,112 @@ it_is_safe_to_source_twice() {
     # which is fatal under set -e if the guard is not checked first.
     assert_ok . "${BASH_SOURCE[0]%/*}/../libs/tui/term.sh"
 }
+
+# --- cutting text to fit ---------------------------------------------------------
+#
+# Two modules needed this and each had its own copy, so a fix to one left the
+# other wrong. It lives here because the locale question is the terminal's.
+
+TROOT="$(cd "${BASH_SOURCE[0]%/*}/.." && pwd)"
+
+#[test]
+it_leaves_a_string_that_already_fits() {
+    assert_eq "$(tui_cut "short" 20 "...")" "short"
+    assert_eq "$(tui_cut "exactlyten" 10 "...")" "exactlyten"
+}
+
+#[test]
+it_cuts_to_the_width_it_was_given() {
+    local out
+    out="$(tui_cut "a much longer string than the space allowed" 12 "...")"
+    assert_eq "${#out}" "12"
+    out="$(tui_cut "a much longer string than the space allowed" 5 "...")"
+    assert_eq "${#out}" "5"
+}
+
+#[test]
+it_ends_a_cut_string_with_the_mark() {
+    assert_ok grep -q '\.\.\.$' <<<"$(tui_cut "abcdefghijkl" 8 "...")"
+}
+
+#[test]
+it_refuses_a_width_of_nothing() {
+    assert_eq "$(tui_cut "abc" 0 "...")" ""
+    assert_eq "$(tui_cut "abc" -4 "...")" ""
+    assert_eq "$(tui_cut "abc" notanumber "...")" ""
+}
+
+#[test]
+it_does_not_leave_half_a_character_behind() {
+    local body out
+    body="$(printf '\xc3\xa9%.0s' {1..20})"
+    local n
+    for n in 9 10 11 12 13 14 15 16; do
+        out="$(LC_ALL=C LC_CTYPE=C LANG=C tui_cut "$body" "$n" '...')"
+        # Decoded, not grepped: a lone lead byte is what a split leaves, and
+        # the obvious byte-class greps for it match nothing either way.
+        assert_ok python3 -c 'import sys; sys.stdin.buffer.read().decode("utf-8")' <<<"$out"
+    done
+}
+
+#[test]
+it_keeps_every_character_the_width_allows() {
+    # The other half. A cut that strips a whole character it did not need to
+    # also decodes cleanly, and would pass the test above while losing text.
+    local body out kept
+    body="$(printf '\xc3\xa9%.0s' {1..20})"
+    # 11 bytes, minus a 3-byte mark, leaves 8 bytes: four whole e-acutes.
+    out="$(LC_ALL=C LC_CTYPE=C LANG=C tui_cut "$body" 11 '...')"
+    kept="$(printf '%s' "${out%...}" | LC_ALL=C awk '{print length($0)}')"
+    assert_eq "$kept" "8"
+}
+
+#[test]
+it_has_a_detector_that_notices_a_split_character() {
+    # The positive control for the decode assertion above.
+    assert_fails python3 -c 'import sys; sys.stdin.buffer.read().decode("utf-8")' \
+        <<<"$(printf 'xxx\xc3')"
+}
+
+#[test]
+it_picks_a_mark_the_terminal_can_draw() {
+    assert_eq "$(LC_ALL=C LC_CTYPE=C LANG=C tui_ellipsis)" "..."
+    assert_eq "$(LC_ALL=en_US.UTF-8 TERM=linux tui_ellipsis)" "..."
+    assert_eq "$(LC_ALL=en_US.UTF-8 TERM=xterm tui_ellipsis)" "…"
+}
+
+# --- the flags mean something as soon as the module is loaded ---------------------
+
+#[test]
+it_knows_about_the_terminal_without_being_asked_first() {
+    # TUI_TTY and TUI_COLOR used to sit at their defaults until tui_begin ran,
+    # so a module gating its colour on TUI_COLOR printed none at all for the
+    # caller its own usage header describes. Measured on a real pty.
+    local out
+    out="$(python3 - "$TROOT" <<'PY'
+import pty, os, sys
+root = sys.argv[1]
+script = (
+    'cd %s; . lib/nutshell/init; . libs/tui/term.sh; . libs/tui/report.sh; '
+    'tui_report_reset; tui_report_row fail a b; '
+    'printf "escapes:%%d\\n" "$(tui_report_show T | grep -c $\'\\x1b\')"' % root
+)
+buf = []
+pty.spawn(["bash", "-c", script], lambda fd: (lambda d: (buf.append(d), d)[1])(os.read(fd, 1024)))
+print(b"".join(buf).decode(errors="replace"))
+PY
+)"
+    # Colour on a terminal, without the caller having probed anything.
+    assert_ok grep -qE 'escapes:[1-9]' <<<"$out"
+}
+
+#[test]
+it_still_writes_no_colour_into_a_pipe() {
+    # The other direction of the same flag, and the one that matters for a log.
+    local out
+    out="$(cd "$TROOT" && bash -c '
+        . lib/nutshell/init; . libs/tui/term.sh; . libs/tui/report.sh
+        tui_report_reset; tui_report_row fail a b
+        tui_report_show T')"
+    assert_fails grep -q $'\x1b' <<<"$out"
+}
