@@ -45,6 +45,9 @@ fi
 # -----------------------------------------------------------------------------
 
 declare -g TUI_KEY=""
+# What the last key means as a movement. Set by `tui_key_motion_now`, and
+# declared here so a reader under `set -u` never finds it missing.
+declare -g TUI_MOTION=""
 
 # How long to wait for the rest of an escape sequence. Long enough that a slow
 # link does not split one, short enough that pressing escape alone still feels
@@ -206,12 +209,25 @@ tui_key_read() {
 # shift-tab moves up, so a screen is navigable from a keyboard missing arrows.
 # Usage: tui_key_motion -> prints up, down, left, right, or the key itself
 tui_key_motion() {
+    tui_key_motion_now
+    printf '%s' "$TUI_MOTION"
+}
+
+#[pub]
+# The same answer left in `TUI_MOTION` instead of printed.
+#
+# For a loop that reads it every key. Command substitution is a fork, a fork is
+# about three quarters of a millisecond even on a fast machine, and a wheel
+# event arrives as a couple of hundred keys. `tools/absorb-cost-report` is the
+# measurement.
+# Usage: tui_key_motion_now; case "$TUI_MOTION" in ...
+tui_key_motion_now() {
     case "$TUI_KEY" in
-        up|k|$'\020'|shift-tab)  printf 'up'    ;;
-        down|j|$'\016'|tab)      printf 'down'  ;;
-        left|h|$'\002')          printf 'left'  ;;
-        right|l|$'\006')         printf 'right' ;;
-        *)                       printf '%s' "$TUI_KEY" ;;
+        up|k|$'\020'|shift-tab)  TUI_MOTION='up'    ;;
+        down|j|$'\016'|tab)      TUI_MOTION='down'  ;;
+        left|h|$'\002')          TUI_MOTION='left'  ;;
+        right|l|$'\006')         TUI_MOTION='right' ;;
+        *)                       TUI_MOTION="$TUI_KEY" ;;
     esac
 }
 

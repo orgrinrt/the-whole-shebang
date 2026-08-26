@@ -293,7 +293,7 @@ it_scrolls_against_the_filtered_length_not_the_full_one() {
     TUI_MENU_TEXT=(Disk Alpha Beta Gamma Boot Delta Epsilon)
     TUI_MENU_FILTER="alpha"; tui_menu_refilter
     assert_eq "$(_tui_menu_window 0 4 0)" "0"
-    assert_eq "$(_tui_menu_len)" "2"
+    assert_eq "${#TUI_MENU_VIEW[@]}" "2"
 }
 
 #[test]

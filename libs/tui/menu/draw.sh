@@ -205,7 +205,7 @@ _tui_menu_help() {
 _tui_menu_render() {
     local cursor="$1" top="$2" height="$3" title="$4"
     local n i row=1 raw
-    n="$(_tui_menu_len)"
+    n=${#TUI_MENU_VIEW[@]}
 
     tui_clear
     tui_move $row 1; printf '%s%s%s' "$TUI_C_HEAD" "$title" "$TUI_C_END"; row=$(( row + 2 ))
