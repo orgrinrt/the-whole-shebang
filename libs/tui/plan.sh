@@ -193,6 +193,11 @@ _plan_sort_shapes() {
 declare -g _PLAN_SORTED=""
 
 # The shapes a panel declared, as an array, split on spaces and nothing else.
+#
+# It leaves the answer in a global rather than printing it, which is what makes
+# it worth a function: printing would put a fork in the middle of the layout
+# arithmetic, and the callers run it per panel per draw.
+#[allow(trivial_wrapper)]
 _plan_shapes_of() {
     local IFS=' '
     # shellcheck disable=SC2206
