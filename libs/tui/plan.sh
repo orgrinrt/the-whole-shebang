@@ -66,6 +66,20 @@ declare -ga TUI_PLAN_H=()
 
 declare -gi TUI_PLAN_DROPPED=0
 
+# How many placements the search may try before it stops looking for the best
+# arrangement and keeps the best it has.
+#
+# Without one this is a backtracking search over every shape at every free
+# rectangle, and the free list grows as panels are placed: ten panels with four
+# shapes each on a screen where they do not all fit took two and a half
+# minutes. A menu redraws on every keypress, so an unbounded search is not a
+# slow feature, it is a hang.
+declare -gi TUI_PLAN_BUDGET="${TUI_PLAN_BUDGET:-4000}"
+declare -gi TUI_PLAN_SPENT=0
+#[pub]
+# Did the search run out of budget and settle for what it had?
+declare -gi TUI_PLAN_GAVE_UP=0
+
 #[pub]
 # Start a plan for a screen of this size. Defaults to the terminal's.
 # Usage: tui_plan_reset [cols] [rows]
@@ -102,7 +116,9 @@ tui_plan_panel() {
     [[ "$prio" =~ ^[0-9]+$ ]] || prio=1
     TUI_PLAN_NAME+=("$name")
     TUI_PLAN_PRIO+=("$prio")
-    TUI_PLAN_SHAPES+=("$*")
+    # Sorted here, once, rather than in the search where the same list was
+    # re-sorted through a pipe at every node it was reached from.
+    TUI_PLAN_SHAPES+=("$(_plan_sort_shapes "$@")")
     TUI_PLAN_R+=(0); TUI_PLAN_C+=(0); TUI_PLAN_W+=(0); TUI_PLAN_H+=(0)
 }
 
@@ -163,13 +179,29 @@ _plan_attempt() {
 # The shapes a panel can take, largest area first. Declared order is the
 # author's, not a preference: "the largest that fits" is about the space it
 # covers, so that is what it is sorted by.
-_plan_shapes_by_area() {
-    local shape w h
-    for shape in $1; do
+#
+# In the shell, because it runs once per panel and a handful of shapes does not
+# need sort(1). It used to run inside the search, through a pipe, at every node
+# a panel was reached from.
+_plan_sort_shapes() {
+    local -a shapes=() areas=()
+    local shape w h i j n=0
+    for shape in "$@"; do
         w="${shape%%x*}"; h="${shape##*x}"
         [[ "$w" =~ ^[0-9]+$ && "$h" =~ ^[0-9]+$ ]] || continue
-        printf '%d %s\n' $(( w * h )) "$shape"
-    done | sort -rn | awk '{print $2}'
+        shapes+=("$shape"); areas+=($(( w * h ))); n=$(( n + 1 ))
+    done
+    # Insertion sort, descending by area. n is single digits.
+    for (( i = 1; i < n; i++ )); do
+        local a="${areas[$i]}" sh="${shapes[$i]}"
+        j=$(( i - 1 ))
+        while (( j >= 0 )) && (( areas[j] < a )); do
+            areas[j+1]="${areas[$j]}"; shapes[j+1]="${shapes[$j]}"
+            j=$(( j - 1 ))
+        done
+        areas[j+1]="$a"; shapes[j+1]="$sh"
+    done
+    printf '%s' "${shapes[*]}"
 }
 
 # Free space, as a set of overlapping maximal rectangles.
@@ -199,18 +231,14 @@ _plan_split_all() {
             out+=("$rect"); continue
         fi
 
-        # Left of it.
         (( pc > fc ))   && out+=("$fr $fc $(( pc - fc )) $fh")
-        # Right of it.
         (( pc2 < fc2 )) && out+=("$fr $pc2 $(( fc2 - pc2 )) $fh")
-        # Above it.
         (( pr > fr ))   && out+=("$fr $fc $fw $(( pr - fr ))")
-        # Below it.
         (( pr2 < fr2 )) && out+=("$pr2 $fc $fw $(( fr2 - pr2 ))")
     done
 
-    # Anything wholly inside another rectangle says nothing the other does not,
-    # and left in, the list grows without bound as panels are placed.
+    # Anything wholly inside another says nothing the other does not, and left
+    # in, the list grows without bound as panels are placed.
     _PLAN_FREE=()
     local i j n="${#out[@]}" keep
     for (( i = 0; i < n; i++ )); do
@@ -223,8 +251,6 @@ _plan_split_all() {
             read -r gr gc gw gh <<< "${out[$j]}"
             (( gw > 0 && gh > 0 )) || continue
             if (( fr >= gr && fc >= gc && fr + fh <= gr + gh && fc + fw <= gc + gw )); then
-                # Identical rectangles would each contain the other, so the
-                # earlier one wins and the later is dropped.
                 if (( fr == gr && fc == gc && fw == gw && fh == gh )); then
                     (( j < i )) && { keep=0; break; }
                 else
@@ -246,6 +272,8 @@ _plan_place() {
     local shape sw sh j
     local -a saved
 
+    (( TUI_PLAN_SPENT >= TUI_PLAN_BUDGET )) && return 1
+
     while IFS= read -r shape; do
         [[ -n "$shape" ]] || continue
         sw="${shape%%x*}"; sh="${shape##*x}"
@@ -253,6 +281,9 @@ _plan_place() {
             local fr fc fw fh
             read -r fr fc fw fh <<< "${_PLAN_FREE[$j]}"
             (( fw >= sw && fh >= sh )) || continue
+
+            TUI_PLAN_SPENT=$(( TUI_PLAN_SPENT + 1 ))
+            (( TUI_PLAN_SPENT > TUI_PLAN_BUDGET )) && { TUI_PLAN_GAVE_UP=1; return 1; }
 
             saved=("${_PLAN_FREE[@]}")
             TUI_PLAN_R[idx]="$fr"; TUI_PLAN_C[idx]="$fc"
@@ -267,13 +298,61 @@ _plan_place() {
             TUI_PLAN_R[idx]=0; TUI_PLAN_C[idx]=0
             TUI_PLAN_W[idx]=0; TUI_PLAN_H[idx]=0
         done
-    done < <(_plan_shapes_by_area "${TUI_PLAN_SHAPES[$idx]}")
+    done < <(printf '%s\n' ${TUI_PLAN_SHAPES[$idx]})
 
     return 1
 }
 
 declare -ga _PLAN_FREE=()
 declare -ga _PLAN_ORDER=()
+
+# Place what can be placed, skipping what cannot, without backtracking.
+#
+# For the last arm only, where no arrangement keeps every undroppable panel and
+# the honest answer is "here is what there was room for". The search proper
+# unwinds on failure, which is right when it is looking for an arrangement and
+# wrong when it has stopped looking.
+_plan_best_effort() {
+    local main_w="$1" main_h="$2"
+    local n="${#TUI_PLAN_NAME[@]}" i
+
+    _PLAN_FREE=()
+    while read -r r c w h; do
+        [[ -n "$r" ]] || continue
+        _PLAN_FREE+=("$r $c $w $h")
+    done < <(_plan_free "$main_w" "$main_h")
+
+    for (( i = 0; i < n; i++ )); do
+        TUI_PLAN_R[i]=0; TUI_PLAN_C[i]=0; TUI_PLAN_W[i]=0; TUI_PLAN_H[i]=0
+    done
+
+    local order=()
+    while read -r i; do order+=("$i"); done < <(
+        for (( i = 0; i < n; i++ )); do
+            printf '%d %d\n' "${TUI_PLAN_PRIO[$i]}" "$i"
+        done | sort -n -k1,1 -k2,2 | awk '{print $2}'
+    )
+
+    local idx shape sw sh j
+    for idx in ${order[@]+"${order[@]}"}; do
+        local placed=0
+        while IFS= read -r shape; do
+            [[ -n "$shape" ]] || continue
+            sw="${shape%%x*}"; sh="${shape##*x}"
+            for (( j = 0; j < ${#_PLAN_FREE[@]}; j++ )); do
+                local fr fc fw fh
+                read -r fr fc fw fh <<< "${_PLAN_FREE[$j]}"
+                (( fw >= sw && fh >= sh )) || continue
+                TUI_PLAN_R[idx]="$fr"; TUI_PLAN_C[idx]="$fc"
+                TUI_PLAN_W[idx]="$sw"; TUI_PLAN_H[idx]="$sh"
+                _plan_split_all "$fr" "$fc" "$sw" "$sh"
+                placed=1; break
+            done
+            (( placed == 1 )) && break
+        done < <(printf '%s\n' ${TUI_PLAN_SHAPES[$idx]})
+    done
+    return 0
+}
 
 #[pub]
 # Work out the arrangement. Every panel that can be placed is placed; the ones
@@ -284,6 +363,7 @@ tui_plan_solve() {
     local n="${#TUI_PLAN_NAME[@]}" i
     (( n > 0 )) || { TUI_PLAN_DROPPED=0; return 0; }
 
+    TUI_PLAN_SPENT=0; TUI_PLAN_GAVE_UP=0
     local main_w="$TUI_PLAN_MAIN_W" main_h="$TUI_PLAN_MAIN_H"
     (( main_w < 1 )) && main_w=1
     (( main_h < 1 )) && main_h=1
@@ -319,15 +399,27 @@ tui_plan_solve() {
             TUI_PLAN_DROPPED="$dropped"
             return 0
         fi
+        # Out of budget: stop trying arrangements and keep what can be placed
+        # greedily. Fewer dropped than this might exist and is no longer worth
+        # the wait.
+        (( TUI_PLAN_GAVE_UP == 1 )) && break
     done
 
-    # Nothing fits at all. Everything that may be dropped is, and what is left
-    # is placed as far as it goes: the caller can see what happened by asking
-    # which panels have room.
-    TUI_PLAN_DROPPED="$n"
+    # Nothing that keeps every undroppable panel fits. One last attempt with
+    # everything droppable already dropped, so a panel that cannot be dropped
+    # is still placed if there is anywhere for it: the caller asks which panels
+    # have room, and a caller written against that answer should not find every
+    # one of them empty.
+    #
+    # The comment here used to promise exactly that while the loop underneath
+    # zeroed every placement, including the ones that had succeeded.
+    _plan_best_effort "$main_w" "$main_h"
+
+    local placed=0
     for (( i = 0; i < n; i++ )); do
-        TUI_PLAN_R[i]=0; TUI_PLAN_C[i]=0; TUI_PLAN_W[i]=0; TUI_PLAN_H[i]=0
+        (( TUI_PLAN_W[i] > 0 )) && placed=$(( placed + 1 ))
     done
+    TUI_PLAN_DROPPED=$(( n - placed ))
     return 1
 }
 

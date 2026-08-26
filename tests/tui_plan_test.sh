@@ -397,3 +397,27 @@ it_keeps_three_panels_that_all_fit_in_one_region() {
     assert_eq "$TUI_PLAN_DROPPED" "0"
     assert_empty "$(_overlaps)"
 }
+
+#[test]
+it_still_places_what_it_can_when_it_cannot_place_everything() {
+    tui_plan_reset 100 30
+    tui_plan_main 60 18
+    tui_plan_panel essential 0 30x12
+    tui_plan_panel enormous  0 400x400
+    tui_plan_solve
+    # `enormous` cannot be dropped and cannot fit, which used to zero every
+    # placement including the ones that had worked. A caller reading
+    # tui_plan_has found nothing anywhere.
+    assert_ok    tui_plan_has essential
+    assert_fails tui_plan_has enormous
+}
+
+#[test]
+it_counts_only_what_it_actually_dropped() {
+    tui_plan_reset 100 30
+    tui_plan_main 60 18
+    tui_plan_panel a 0 30x12
+    tui_plan_panel b 0 400x400
+    tui_plan_solve
+    assert_eq "$TUI_PLAN_DROPPED" "1"
+}

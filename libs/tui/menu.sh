@@ -117,7 +117,11 @@ tui_menu_entry() {
 _tui_menu_match() {
     local i="$1" want="$2"
     [[ -z "$want" ]] && return 0
-    local hay="${TUI_MENU_TEXT[$i]} ${TUI_MENU_NOTE[$i]}"
+    # The id too, not only the label and the note. The id is what a row is
+    # called everywhere else -- it is what the command line takes and what
+    # somebody has in their head -- so searching `fe` for `iso-fetch` found
+    # nothing, because the label said "Put an install image on the stick".
+    local hay="${TUI_MENU_ID[$i]} ${TUI_MENU_TEXT[$i]} ${TUI_MENU_NOTE[$i]}"
     [[ "${hay,,}" == *"${want,,}"* ]]
 }
 

@@ -491,3 +491,36 @@ it_forgets_the_panel_on_reset() {
     tui_menu_reset
     assert_eq "${#TUI_MENU_ASIDE[@]}" "0"
 }
+
+#[test]
+it_finds_a_row_by_the_name_it_is_called_by() {
+    tui_menu_reset
+    tui_menu_heading install
+    tui_menu_entry iso-fetch     "Put an install image on the stick" ok
+    tui_menu_entry stick-refresh "Freshen the stick from this machine" ok
+    # The id is what a row is called everywhere else: it is what the command
+    # line takes and what somebody has in their head. Searching `fe` for
+    # `iso-fetch` found nothing, because only the label was searched.
+    TUI_MENU_FILTER="fe"
+    tui_menu_refilter
+    local found=""
+    local i
+    for i in "${TUI_MENU_VIEW[@]}"; do
+        [[ "${TUI_MENU_STATE[$i]}" == "heading" ]] && continue
+        found="${found}${TUI_MENU_ID[$i]} "
+    done
+    assert_eq "$found" "iso-fetch "
+    TUI_MENU_FILTER=""
+}
+
+#[test]
+it_still_finds_a_row_by_its_label_and_its_note() {
+    tui_menu_reset
+    tui_menu_heading install
+    tui_menu_entry aaa "Put an install image on the stick" ok "needs the network"
+    TUI_MENU_FILTER="image"; tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "2"
+    TUI_MENU_FILTER="network"; tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "2"
+    TUI_MENU_FILTER=""
+}
