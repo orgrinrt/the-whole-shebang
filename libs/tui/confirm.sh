@@ -26,6 +26,14 @@
 # because nothing was there to say no; the caller has to pass the answer in
 # explicitly instead.
 #
+# When tui/modal is loaded and a session is on the screen, the question is
+# drawn in a box over the middle of it. Printed at the cursor instead, it lands
+# wherever the last thing drawn left it, which after a full-screen menu is the
+# bottom of the terminal: a long way from where the person is looking on a tall
+# window, and a prompt nobody notices is a prompt answered by reflex once they
+# find it. The caller redraws afterwards; TUI_CONFIRM_REDRAW names a function
+# to call for that.
+#
 # Usage:
 #   use shebang::tui/confirm
 #
@@ -43,6 +51,25 @@ if ! declare -F use >/dev/null 2>&1; then
 fi
 
 use color
+
+# A function that redraws whatever the confirmation covered. The menu sets it
+# to its own draw, so a box appears over the list and the list comes back.
+declare -g TUI_CONFIRM_REDRAW="${TUI_CONFIRM_REDRAW:-}"
+
+# Is there a screen to draw a box on, and something loaded that can draw one?
+_tui_confirm_modal_ok() {
+    tui_is_tty || return 1
+    declare -F tui_modal_open >/dev/null 2>&1 || return 1
+    # Only inside a session. Outside one there is nothing underneath to cover,
+    # and printing the question where the cursor is is exactly right.
+    [[ "${_TUI_ACTIVE:-0}" == "1" ]]
+}
+
+_tui_confirm_redraw() {
+    [[ -n "$TUI_CONFIRM_REDRAW" ]] || return 0
+    declare -F "$TUI_CONFIRM_REDRAW" >/dev/null 2>&1 || return 0
+    "$TUI_CONFIRM_REDRAW"
+}
 
 # Set to 1 to make every confirmation answer yes without asking. For tests and
 # for a caller that has already obtained consent some other way. Deliberately
@@ -64,8 +91,15 @@ tui_confirm() {
     tui_is_tty || return 1
 
     local answer=""
-    printf '%s [y/N] ' "$1"
-    IFS= read -r answer 2>/dev/null || { printf '\n'; return 1; }
+    if _tui_confirm_modal_ok; then
+        tui_modal_open "$1"
+        answer="$(tui_modal_prompt '[y/N] ')" || { tui_modal_close; _tui_confirm_redraw; return 1; }
+        tui_modal_close
+        _tui_confirm_redraw
+    else
+        printf '%s [y/N] ' "$1"
+        IFS= read -r answer 2>/dev/null || { printf '\n'; return 1; }
+    fi
     case "$answer" in
         y|Y|yes|YES|Yes) return 0 ;;
         *)               return 1 ;;
@@ -81,9 +115,16 @@ tui_confirm_typed() {
     [[ "$TUI_CONFIRM_ASSUME_YES" == "1" ]] && return 0
     tui_is_tty || return 1
 
-    printf '%s\n' "$question"
-    printf '%sType %s to continue:%s ' "$BOLD" "$want" "$NC"
-    IFS= read -r answer 2>/dev/null || { printf '\n'; return 1; }
+    if _tui_confirm_modal_ok; then
+        tui_modal_open "$question" "Type ${want} to continue."
+        answer="$(tui_modal_prompt '> ')" || { tui_modal_close; _tui_confirm_redraw; return 1; }
+        tui_modal_close
+        _tui_confirm_redraw
+    else
+        printf '%s\n' "$question"
+        printf '%sType %s to continue:%s ' "$TUI_C_HEAD" "$want" "$TUI_C_END"
+        IFS= read -r answer 2>/dev/null || { printf '\n'; return 1; }
+    fi
     [[ "$answer" == "$want" ]]
 }
 
@@ -100,11 +141,19 @@ tui_confirm_name() {
     [[ "$TUI_CONFIRM_ASSUME_YES" == "1" ]] && return 0
     tui_is_tty || return 1
 
-    printf '\n%s%s%s\n' "$BOLD" "$what" "$NC"
-    printf '  %s%s%s\n' "$BOLD" "$name" "$NC"
-    for line in "$@"; do printf '  %s%s%s\n' "$DIM" "$line" "$NC"; done
-    printf '\nThis cannot be undone.\n'
-    printf 'Type the name back to continue: '
-    IFS= read -r answer 2>/dev/null || { printf '\n'; return 1; }
+    if _tui_confirm_modal_ok; then
+        tui_modal_open "$what" "$name" "$@" "" "This cannot be undone."
+        answer="$(tui_modal_prompt 'Type the name back: ')" \
+            || { tui_modal_close; _tui_confirm_redraw; return 1; }
+        tui_modal_close
+        _tui_confirm_redraw
+    else
+        printf '\n%s%s%s\n' "$TUI_C_BAD" "$what" "$TUI_C_END"
+        printf '  %s%s%s\n' "$TUI_C_HEAD" "$name" "$TUI_C_END"
+        for line in "$@"; do printf '  %s%s%s\n' "$TUI_C_MUTE" "$line" "$TUI_C_END"; done
+        printf '\nThis cannot be undone.\n'
+        printf 'Type the name back to continue: '
+        IFS= read -r answer 2>/dev/null || { printf '\n'; return 1; }
+    fi
     [[ "$answer" == "$name" ]]
 }

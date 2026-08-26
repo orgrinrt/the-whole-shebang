@@ -191,21 +191,62 @@ use color
 # One row. Markers are ascii on purpose: this runs in a recovery console where
 # the font is whatever the kernel had, and a box-drawing character that renders
 # as a question mark is worse than a hyphen that was always going to be one.
+# Where the state column starts. Fixed, so the eye lands on one place instead
+# of following a ragged right edge: a status appended to a label of whatever
+# length it happened to be is a status nobody finds.
+declare -gi TUI_MENU_STATE_COL="${TUI_MENU_STATE_COL:-34}"
+
 _tui_menu_row() {
     local i="$1" selected="$2" state="${TUI_MENU_STATE[$i]}" text="${TUI_MENU_TEXT[$i]}"
 
     if [[ "$state" == "heading" ]]; then
-        printf '%s' "${BOLD}${text}${NC}"
+        printf '%s%s%s' "$TUI_C_HEAD" "$text" "$TUI_C_END"
         return 0
     fi
 
-    local mark="  " body="$text"
+    local col="$TUI_MENU_STATE_COL" cols="${TUI_COLS:-80}"
+    [[ "$col" =~ ^[0-9]+$ ]] || col=34
+    # On a narrow screen the label wins; there is no point aligning a column
+    # that would be off the edge.
+    (( col > cols - 10 )) && col=$(( cols - 10 ))
+    (( col < 12 )) && col=12
+
+    local mark="  " label="$text" word="" colour=""
     case "$state" in
-        done) body="${text}${DIM}   done${NC}" ;;
-        off)  body="${DIM}${text}${NC}"        ;;
+        done) word="done"; colour="$TUI_C_OK" ;;
+        off)  word="off";  colour="$TUI_C_OFF" ;;
+        warn) word="warn"; colour="$TUI_C_WARN" ;;
+        fail) word="fail"; colour="$TUI_C_BAD" ;;
     esac
-    [[ "$selected" == "1" ]] && mark="${BOLD}> ${NC}"
-    printf '  %s%s' "$mark" "$body"
+    [[ "$selected" == "1" ]] && mark="${TUI_C_SEL}> ${TUI_C_END}"
+
+    # The label, dimmed when the row is unavailable, cut so it cannot push the
+    # column it is meant to line up with.
+    local room=$(( col - 5 )) shown="$label" len
+    (( room < 4 )) && room=4
+    len="${#label}"
+    if (( len > room )); then
+        shown="$(tui_cut "$label" "$room")"
+        len="${#shown}"
+    fi
+
+    local pad=""
+    (( col - 5 - len > 0 )) && printf -v pad '%*s' $(( col - 5 - len )) ''
+
+    if [[ "$state" == "off" ]]; then
+        printf '  %s%s%s%s%s' "$mark" "$TUI_C_OFFTXT" "$shown" "$TUI_C_END" "$pad"
+    else
+        printf '  %s%s%s' "$mark" "$shown" "$pad"
+    fi
+    [[ -n "$word" ]] && printf '%s%s%s' "$colour" "$word" "$TUI_C_END"
+}
+
+_tui_menu_rule_char() {
+    if declare -F tui_unicode_ok >/dev/null 2>&1 && tui_unicode_ok; then
+        printf '\u2500' | cat
+    else
+        printf -- '-'
+    fi
 }
 
 # The whole screen. Redrawn on every key, which at this size is cheaper than
@@ -216,11 +257,11 @@ _tui_menu_render() {
     n="$(_tui_menu_len)"
 
     tui_clear
-    tui_move $row 1; printf '%s%s%s' "$BOLD" "$title" "$NC"; row=$(( row + 2 ))
+    tui_move $row 1; printf '%s%s%s' "$TUI_C_HEAD" "$title" "$TUI_C_END"; row=$(( row + 2 ))
 
     if (( n == 0 )); then
         tui_move $row 1
-        printf '%snothing matches %s%s' "$DIM" "\"${TUI_MENU_FILTER}\"" "$NC"
+        printf '%snothing matches %s%s' "$TUI_C_WARN" "\"${TUI_MENU_FILTER}\"" "$TUI_C_END"
     fi
 
     for (( i = top; i < top + height && i < n; i++ )); do
@@ -230,23 +271,34 @@ _tui_menu_render() {
         row=$(( row + 1 ))
     done
 
-    # The note for whatever is under the cursor, pinned to the bottom so it
-    # does not move as the list scrolls.
+    # The note for whatever is under the cursor. Set apart by a rule and given
+    # the label's own emphasis rather than dimmed into the background: dimmed
+    # text at the bottom of a tall window is text nobody notices is there, and
+    # a description nobody reads is a description nobody wrote.
     raw="${TUI_MENU_VIEW[$cursor]:-$cursor}"
     local note="${TUI_MENU_NOTE[$raw]:-}"
-    tui_move $(( TUI_ROWS - 2 )) 1
-    [[ -n "$note" ]] && printf '%s%s%s' "$DIM" "$note" "$NC"
+    local what="${TUI_MENU_TEXT[$raw]:-}"
+    if [[ -n "$note" || -n "$what" ]]; then
+        local rule
+        printf -v rule '%*s' $(( ${TUI_COLS:-80} > 2 ? ${TUI_COLS:-80} - 1 : 1 )) ''
+        tui_move $(( TUI_ROWS - 4 )) 1
+        printf '%s%s%s' "$TUI_C_MUTE" "${rule// /$(_tui_menu_rule_char)}" "$TUI_C_END"
+        tui_move $(( TUI_ROWS - 3 )) 1
+        printf '%s%s%s' "$TUI_C_HEAD" "$what" "$TUI_C_END"
+        tui_move $(( TUI_ROWS - 2 )) 1
+        [[ -n "$note" ]] && printf '%s' "$note"
+    fi
 
     # The filter is shown while it has content, because a list that is quietly
     # hiding rows and does not say so reads as a list with rows missing.
     tui_move $(( TUI_ROWS - 1 )) 1
     if [[ -n "$TUI_MENU_FILTER" ]]; then
-        printf '%sfilter:%s %s' "$BOLD" "$NC" "$TUI_MENU_FILTER"
+        printf '%sfilter:%s %s%s%s' "$TUI_C_KEY" "$TUI_C_END" "$TUI_C_HEAD" "$TUI_MENU_FILTER" "$TUI_C_END"
     fi
 
     tui_move "$TUI_ROWS" 1
     if (( ${_TUI_MENU_FILTERING:-0} == 1 )); then
-        printf '%s%s%s' "$DIM" "typing to narrow   backspace   esc clears   enter choose" "$NC"
+        printf '%s%s%s' "$TUI_C_MUTE" "typing to narrow   backspace   esc clears   enter choose" "$TUI_C_END"
     else
         printf '%s%s%s' "$DIM" "up/down move   enter choose   / search   q back" "$NC"
     fi
