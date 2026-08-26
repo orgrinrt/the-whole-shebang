@@ -162,12 +162,19 @@ _tui_table_line() {
         w="${_TUI_TABLE_W[$i]:-0}"
         (( w > 0 )) || continue                      # dropped on this width
         text="${cells[$i]:-}"
-        if declare -F tui_cut >/dev/null 2>&1; then
-            (( ${#text} > w )) && text="$(tui_cut "$text" "$w")"
-        else
-            (( ${#text} > w )) && text="${text:0:$w}"
+        # Measured as the eye sees it. A cell carrying colour is longer than it
+        # looks, and padding by the string's length pushes every column after
+        # it along by the width of the escapes.
+        local vis
+        if declare -F tui_vis >/dev/null 2>&1; then vis="$(tui_vis "$text")"
+        else vis="${#text}"; fi
+        if (( vis > w )); then
+            if declare -F tui_cut >/dev/null 2>&1; then text="$(tui_cut "$text" "$w")"
+            else text="${text:0:$w}"; fi
+            if declare -F tui_vis >/dev/null 2>&1; then vis="$(tui_vis "$text")"
+            else vis="${#text}"; fi
         fi
-        printf -v pad '%*s' $(( w - ${#text} )) ''
+        printf -v pad '%*s' $(( w - vis )) ''
         [[ -n "$out" ]] && out="${out}${TUI_TABLE_GAP}"
         out="${out}${text}${pad}"
     done
@@ -176,8 +183,10 @@ _tui_table_line() {
     # wraps, and the wrapped remainder is the mess the reflow exists to
     # prevent; when the floors genuinely cannot fit, showing less is the only
     # honest answer left.
-    local limit="${_TUI_TABLE_WIDTH:-0}"
-    if [[ "$limit" =~ ^[0-9]+$ ]] && (( limit > 0 )) && (( ${#out} > limit )); then
+    local limit="${_TUI_TABLE_WIDTH:-0}" outvis
+    if declare -F tui_vis >/dev/null 2>&1; then outvis="$(tui_vis "$out")"
+    else outvis="${#out}"; fi
+    if [[ "$limit" =~ ^[0-9]+$ ]] && (( limit > 0 )) && (( outvis > limit )); then
         if declare -F tui_cut >/dev/null 2>&1; then out="$(tui_cut "$out" "$limit")"
         else out="${out:0:$limit}"; fi
     fi

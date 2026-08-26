@@ -128,15 +128,7 @@ _tui_frame_rep() {
 # so a title in CJK draws a box wider than it measures. Fine for the consoles
 # this is for, and worth knowing before relying on it elsewhere.
 # Usage: tui_frame_vis <text> -> a number
-tui_frame_vis() {
-    local s
-    # One pass, and it forks. An earlier version did a substitution first and
-    # then threw the result away by recomputing from the argument, under a
-    # comment saying it avoided the fork. That is the exact shape this module
-    # was rewritten to remove.
-    s="$(printf '%s' "$1" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' 2>/dev/null)" || s="$1"
-    printf '%d' "${#s}"
-}
+tui_frame_vis() { tui_vis "$1"; }
 
 #[pub]
 # Open a frame. Everything said until it closes sits inside it.

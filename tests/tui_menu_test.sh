@@ -980,3 +980,87 @@ it_takes_nothing_when_nothing_is_waiting() {
     # or the loop would block until the next key instead of drawing.
     assert_fails tui_key_read_now </dev/null
 }
+
+# --- the list is a table -----------------------------------------------------
+#
+# A menu with its own column arithmetic is a menu whose columns line up
+# differently from every other list in the same interface.
+
+_menu_drawn() {
+    local cursor="${1:-1}" cols="${2:-96}"
+    local saved="$TUI_COLS" savedr="$TUI_ROWS"
+    TUI_COLS="$cols"; TUI_ROWS=24
+    local f; f="$(mktemp)"
+    _tui_menu_render "$cursor" 0 10 "t" > "$f" 2>&1
+    _strip < "$f"
+    rm -f "$f"
+    TUI_COLS="$saved"; TUI_ROWS="$savedr"
+}
+_strip() { sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'; }
+
+_menu_rows() {
+    tui_menu_reset
+    TUI_MENU_GROUP=section; TUI_MENU_SORT=declared
+    TUI_MENU_FILTERS=(); TUI_MENU_FILTER_ON=""
+    tui_menu_heading disk
+    tui_menu_entry disk-health "Check disk health" ok  "smart attributes" check
+    tui_menu_entry disk-wipe   "Erase a disk"      off "needs root"       action
+    tui_menu_refilter
+}
+
+#[test]
+it_puts_the_state_in_the_same_column_on_every_row() {
+    # The complaint this answers: a status appended to a label of whatever
+    # length it happened to be is a status nobody finds.
+    _menu_rows
+    local out; out="$(_menu_drawn)"
+    local line; line="$(grep -m1 'Erase a disk' <<<"$out")"
+    local before="${line%%off*}"
+    # The state begins past the name column, not right after the label.
+    assert_ok test "${#before}" -gt "$(( ${#line} > 0 ? 20 : 0 ))"
+}
+
+#[test]
+it_shows_the_note_beside_the_row_and_not_only_under_the_cursor() {
+    # A description you have to move the cursor onto to read is a description
+    # nobody reads while deciding which row to move onto.
+    _menu_rows
+    local out; out="$(_menu_drawn 1)"
+    local line; line="$(grep -m1 'Erase a disk' <<<"$out")"
+    # The cursor is on the other row, so this note is the inline one.
+    assert_contains "$line" "needs root"
+}
+
+#[test]
+it_drops_the_note_before_it_drops_the_name() {
+    # The note repeats below the list, so losing it on a narrow screen costs
+    # nothing. Losing the name would cost the row.
+    _menu_rows
+    local out; out="$(_menu_drawn 1 40)"
+    assert_contains "$out" "Erase a disk"
+    local line; line="$(grep -m1 'Erase a disk' <<<"$out")"
+    assert_fails grep -q 'needs root' <<<"$line"
+}
+
+#[test]
+it_marks_the_row_the_cursor_is_on() {
+    _menu_rows
+    local out; out="$(_menu_drawn 1)"
+    assert_ok grep -qE '^>' <<<"$(grep -m1 'Check disk health' <<<"$out")"
+}
+
+#[test]
+it_does_not_mark_the_rows_it_is_not_on() {
+    _menu_rows
+    local out; out="$(_menu_drawn 1)"
+    assert_fails grep -qE '^>' <<<"$(grep -m1 'Erase a disk' <<<"$out")"
+}
+
+#[test]
+it_draws_a_heading_across_the_row_rather_than_in_a_column() {
+    # A heading labels what follows; it is not a thing with a state.
+    _menu_rows
+    local out; out="$(_menu_drawn)"
+    local line; line="$(grep -m1 'disk$\|disk ' <<<"$out")"
+    assert_contains "$out" "disk"
+}

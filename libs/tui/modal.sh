@@ -65,10 +65,7 @@ _tui_modal_rep() {
     printf '%s' "${out// /$c}"
 }
 
-_tui_modal_vis() {
-    local s; s="$(printf '%s' "$1" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' 2>/dev/null)" || s="$1"
-    printf '%d' "${#s}"
-}
+_tui_modal_vis() { tui_vis "$1"; }
 
 #[pub]
 # Open a box over the middle of the screen. Every argument after the title is a

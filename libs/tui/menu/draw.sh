@@ -19,6 +19,7 @@ if ! declare -F use >/dev/null 2>&1; then
 fi
 
 use super::tui::term
+use super::tui::table
 use super::tui::menu
 
 # -----------------------------------------------------------------------------
@@ -35,57 +36,49 @@ use color
 # length it happened to be is a status nobody finds.
 declare -gi TUI_MENU_STATE_COL="${TUI_MENU_STATE_COL:-34}"
 
-_tui_menu_row() {
-    local i="$1" selected="$2" state text
+# What a row looks like, as cells for the table rather than as a line of its
+# own. Answers into _TUI_MENU_CELLS.
+#
+# Through the table because everything else that shows a list goes through it,
+# and a menu with its own column arithmetic is a menu whose columns line up
+# differently from every other list in the same interface. The state column
+# stopped being a number in this file and became a column, which is what it
+# always was.
+declare -ga _TUI_MENU_CELLS=()
 
-    # A negative index is a heading the grouping invented, so it has no row to
-    # read and its label was handed in instead.
-    if (( i < 0 )); then
-        printf '%s%s%s' "$TUI_C_HEAD" "${3:-}" "$TUI_C_END"
+_tui_menu_cells() {
+    local i="$1" selected="$2" heading="${3:-}"
+    _TUI_MENU_CELLS=()
+
+    # A heading spans the row rather than filling the columns: it is a label
+    # for what follows, not a thing with a state.
+    if (( i < 0 )) || [[ "${TUI_MENU_STATE[$i]}" == "heading" ]]; then
+        local label="$heading"
+        [[ -n "$label" ]] || label="${TUI_MENU_TEXT[$i]}"
+        _TUI_MENU_CELLS=("" "${TUI_C_HEAD}${label}${TUI_C_END}" "" "")
         return 0
     fi
-    state="${TUI_MENU_STATE[$i]}"; text="${TUI_MENU_TEXT[$i]}"
 
-    if [[ "$state" == "heading" ]]; then
-        printf '%s%s%s' "$TUI_C_HEAD" "$text" "$TUI_C_END"
-        return 0
-    fi
-
-    local col="$TUI_MENU_STATE_COL" cols="${TUI_COLS:-80}"
-    [[ "$col" =~ ^[0-9]+$ ]] || col=34
-    # On a narrow screen the label wins; there is no point aligning a column
-    # that would be off the edge.
-    (( col > cols - 10 )) && col=$(( cols - 10 ))
-    (( col < 12 )) && col=12
-
-    local mark="  " label="$text" word="" colour=""
+    local state="${TUI_MENU_STATE[$i]}" text="${TUI_MENU_TEXT[$i]}"
+    local mark="" word="" colour=""
     case "$state" in
         done) word="done"; colour="$TUI_C_OK" ;;
         off)  word="off";  colour="$TUI_C_OFF" ;;
         warn) word="warn"; colour="$TUI_C_WARN" ;;
         fail) word="fail"; colour="$TUI_C_BAD" ;;
     esac
-    [[ "$selected" == "1" ]] && mark="${TUI_C_SEL}> ${TUI_C_END}"
+    [[ "$selected" == "1" ]] && mark="${TUI_C_SEL}>${TUI_C_END}"
 
-    # The label, dimmed when the row is unavailable, cut so it cannot push the
-    # column it is meant to line up with.
-    local room=$(( col - 5 )) shown="$label" len
-    (( room < 4 )) && room=4
-    len="${#label}"
-    if (( len > room )); then
-        shown="$(tui_cut "$label" "$room")"
-        len="${#shown}"
-    fi
+    local label="$text"
+    [[ "$state" == "off" ]] && label="${TUI_C_OFFTXT}${text}${TUI_C_END}"
 
-    local pad=""
-    (( col - 5 - len > 0 )) && printf -v pad '%*s' $(( col - 5 - len )) ''
+    # The note beside the row as well as under the cursor. A description you
+    # have to move the cursor onto to read is a description nobody reads while
+    # deciding which row to move onto.
+    local note="${TUI_MENU_NOTE[$i]:-}"
+    [[ -n "$note" ]] && note="${TUI_C_MUTE}${note}${TUI_C_END}"
 
-    if [[ "$state" == "off" ]]; then
-        printf '  %s%s%s%s%s' "$mark" "$TUI_C_OFFTXT" "$shown" "$TUI_C_END" "$pad"
-    else
-        printf '  %s%s%s' "$mark" "$shown" "$pad"
-    fi
-    [[ -n "$word" ]] && printf '%s%s%s' "$colour" "$word" "$TUI_C_END"
+    _TUI_MENU_CELLS=("$mark" "$label" "${colour}${word}${TUI_C_END}" "$note")
 }
 
 _tui_menu_rule_char() {
@@ -225,15 +218,36 @@ _tui_menu_render() {
     (( aside_w > 0 )) && list_cols=$(( list_cols - aside_w - 2 ))
     _tui_menu_render_aside "$aside_w" 3
 
+    # The list, through the table, so its columns are the same columns every
+    # other list in the interface uses. Built once and drawn once rather than a
+    # line at a time: the table solves the widths for the whole thing, which is
+    # what makes a column a column.
     local saved_cols="$TUI_COLS"
     TUI_COLS="$list_cols"
-    for (( i = top; i < top + height && i < n; i++ )); do
-        raw="${TUI_MENU_VIEW[$i]:-$i}"
-        tui_move $row 1
-        if (( i == cursor )); then _tui_menu_row "$raw" 1 "${TUI_MENU_VHEAD[$i]:-}"
-        else                       _tui_menu_row "$raw" 0 "${TUI_MENU_VHEAD[$i]:-}"; fi
-        row=$(( row + 1 ))
-    done
+    if declare -F tui_table_reset >/dev/null 2>&1; then
+        # The name at a fixed width so the state lands in the same place on
+        # every row, which is the whole reason it is a column. The note takes
+        # what is left and is the first thing to go on a narrow screen: it
+        # repeats below the list, so losing it there costs nothing.
+        local name_w="$TUI_MENU_STATE_COL"
+        [[ "$name_w" =~ ^[0-9]+$ ]] || name_w=34
+        (( name_w > list_cols - 10 )) && name_w=$(( list_cols - 10 ))
+        (( name_w < 12 )) && name_w=12
+
+        tui_table_reset
+        tui_table_col mark  1
+        tui_table_col name  "$name_w"
+        tui_table_col state 6
+        tui_table_col note  1fr min:16 --priority 5
+        for (( i = top; i < top + height && i < n; i++ )); do
+            raw="${TUI_MENU_VIEW[$i]:-$i}"
+            if (( i == cursor )); then _tui_menu_cells "$raw" 1 "${TUI_MENU_VHEAD[$i]:-}"
+            else                       _tui_menu_cells "$raw" 0 "${TUI_MENU_VHEAD[$i]:-}"; fi
+            tui_table_row "${_TUI_MENU_CELLS[@]}"
+        done
+        tui_table_render --width "$list_cols" --at "$row" 1 --height "$height"
+        row=$(( row + n - top ))
+    fi
     TUI_COLS="$saved_cols"
 
     # The note for whatever is under the cursor. Set apart by a rule and given

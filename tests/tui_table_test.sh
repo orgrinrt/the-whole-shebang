@@ -340,3 +340,76 @@ it_has_a_watchdog_that_fails_on_a_call_that_never_ran() {
     assert_fails _finishes 'zzz_no_such_function'
     assert_ok    _finishes 'tui_table_reset'
 }
+
+# --- a cell that carries colour ----------------------------------------------
+#
+# Measuring by the string's length pads by the width of the escapes as well as
+# the text, so one coloured cell pushes every column after it along and the
+# table stops being a table.
+
+#[test]
+it_lines_up_a_column_after_a_cell_that_carries_colour() {
+    TUI_COLOR=1; tui_palette
+    tui_table_reset
+    tui_table_col a 10
+    tui_table_col b 10
+    tui_table_row "$(printf '\033[31mred\033[0m')" "second"
+    tui_table_row "plain"                          "second"
+    local f; f="$(mktemp)"
+    tui_table_render --width 40 > "$f"
+    local one two
+    one="$(sed -n 1p "$f" | _strip)"
+    two="$(sed -n 2p "$f" | _strip)"
+    rm -f "$f"
+    TUI_COLOR=0; tui_palette
+    # The same offset in both rows, so `second` begins at the same column.
+    # Compared by width, not by text: the prefixes hold different words.
+    local off_one="${one%%second*}" off_two="${two%%second*}"
+    assert_eq "${#off_one}" "${#off_two}"
+}
+
+#[test]
+it_has_a_detector_that_notices_a_column_out_of_line() {
+    # The control: the comparison above has to be able to fail, and it is a
+    # comparison of widths, so two different widths is what must not pass.
+    local a="red       " b="plain      "
+    assert_ne "${#a}" "${#b}"
+}
+
+#[test]
+it_measures_a_string_by_what_the_eye_sees() {
+    assert_eq "$(tui_vis 'hello')" "5"
+    assert_eq "$(tui_vis "$(printf '\033[31mhello\033[0m')")" "5"
+    assert_eq "$(tui_vis '')" "0"
+    assert_eq "$(tui_vis "$(printf '\033[1m\033[0m')")" "0"
+    assert_eq "$(tui_vis "$(printf 'a\033[32mb\033[0mc')")" "3"
+}
+
+#[test]
+it_cuts_a_coloured_cell_by_what_it_shows_not_what_it_holds() {
+    # A cell too long for its column is cut. Cutting by the raw length throws
+    # away visible text to make room for escapes nobody can see.
+    TUI_COLOR=1; tui_palette
+    tui_table_reset
+    tui_table_col a 8
+    tui_table_row "$(printf '\033[31mabcdefgh\033[0m')"
+    local f; f="$(mktemp)"
+    tui_table_render --width 20 > "$f"
+    local shown; shown="$(_strip < "$f")"
+    rm -f "$f"
+    TUI_COLOR=0; tui_palette
+    # Eight columns of text, not eight columns minus the escape bytes.
+    assert_ok test "${#shown}" -ge 8
+}
+
+#[test]
+it_measures_the_same_way_everywhere_it_measures() {
+    # frame and modal each had their own copy of this, both forking sed on a
+    # path that redraws on a keypress. One definition, or they drift.
+    . "${BASH_SOURCE[0]%/*}/../libs/tui/frame.sh"
+    . "${BASH_SOURCE[0]%/*}/../libs/tui/modal.sh"
+    local t; t="$(printf '\033[1mword\033[0m')"
+    assert_eq "$(tui_frame_vis "$t")" "$(tui_vis "$t")"
+    assert_eq "$(_tui_modal_vis "$t")" "$(tui_vis "$t")"
+    assert_eq "$(tui_vis "$t")" "4"
+}
