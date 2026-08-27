@@ -9,7 +9,11 @@
 # =============================================================================
 
 [meta]
-version = "0.1.0"
+# The schema's version, not this project's. `nutshell`'s
+# `examples/configs/empty.nut.toml` says so where the field is documented, and
+# a review read `0.1.0` here as a claim about the release. The release is the
+# tag and nothing else.
+version = "1.0.0"
 name = "the-whole-shebang"
 description = "Standalone bash libraries built on nutshell, each taken on its own."
 
