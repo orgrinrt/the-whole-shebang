@@ -85,12 +85,19 @@ _tui_frame_glyphs() {
         _TUI_F_TL="+"; _TUI_F_TR="+"; _TUI_F_BL="+"; _TUI_F_BR="+"
         _TUI_F_H="-";  _TUI_F_V="|";  _TUI_F_ELL="..."
     else
-        _TUI_F_TL="\u250c"; _TUI_F_TR="\u2510"; _TUI_F_BL="\u2514"; _TUI_F_BR="\u2518"
-        _TUI_F_H="\u2500";  _TUI_F_V="\u2502";  _TUI_F_ELL="\u2026"
-        # `printf -v` is bash's, and it is the worst of these to get wrong:
-        # a POSIX shell reports an illegal option, carries on, and leaves the
-        # variable empty, so the box would draw with nothing for its corners.
-        # A substitution costs a fork each and this runs once per process.
+        # Octal, not `\uHHHH`. `%b` understands `\uHHHH` in bash and nowhere
+        # else: under `dash` and under `sh` it passes the six characters
+        # through unchanged, so every corner became the literal text `\u250c`
+        # and every width count was six where one was assumed. Octal is in
+        # POSIX `%b` and gives the same bytes in all three, which is what
+        # `log.sh` already does with its tick.
+        _TUI_F_TL='\342\224\214'; _TUI_F_TR='\342\224\220'
+        _TUI_F_BL='\342\224\224'; _TUI_F_BR='\342\224\230'
+        _TUI_F_H='\342\224\200';  _TUI_F_V='\342\224\202'
+        _TUI_F_ELL='\342\200\246'
+        # `printf -v` is bash's, and a POSIX shell reports an illegal option,
+        # returns 2, and leaves the variable exactly as it was. A substitution
+        # costs a fork each and this runs once per process.
         _TUI_F_TL="$(printf '%b' "$_TUI_F_TL")"
         _TUI_F_TR="$(printf '%b' "$_TUI_F_TR")"
         _TUI_F_BL="$(printf '%b' "$_TUI_F_BL")"
