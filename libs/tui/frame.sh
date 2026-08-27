@@ -31,10 +31,19 @@
 #   tui_frame_box "Done" "everything worked" "nothing to do"
 # =============================================================================
 
-[[ -n "${_SHEBANG_TUI_FRAME_SH:-}" ]] && return 0
+[ -n "${_SHEBANG_TUI_FRAME_SH:-}" ] && return 0
+
+# A newline as itself, because there is no `$'\n'` here to write one inline
+# with. The trailing `.` is because command substitution strips the trailing
+# newline, which is the one character being asked for.
+_TUI_FRAME_NL="$(printf '\n.')"; _TUI_FRAME_NL="${_TUI_FRAME_NL%.}"
 readonly _SHEBANG_TUI_FRAME_SH=1
 
-if ! declare -F use >/dev/null 2>&1; then
+# `command -v`, not `declare -F`, which is bash's and is not there under a
+# POSIX shell. It parses anywhere, so `dash -n` never objected: the floor check
+# reads a file, and a file can parse perfectly and still call something that
+# does not exist.
+if ! command -v use >/dev/null 2>&1; then
     printf 'tui: source nutshell first (. path/to/nutshell/init)\n' >&2
     return 1
 fi
@@ -69,7 +78,7 @@ declare -gi _TUI_FRAME_MIN=24
 # ellipsis is three bytes of UTF-8, and putting one inside an ASCII border is
 # the mojibake the ASCII border exists to avoid.
 _tui_frame_glyphs() {
-    if [[ "${TUI_FRAME_ASCII:-0}" == "1" ]] || ! _tui_frame_unicode_ok; then
+    if [ "${TUI_FRAME_ASCII:-0}" = "1" ] || ! _tui_frame_unicode_ok; then
         _TUI_F_TL="+"; _TUI_F_TR="+"; _TUI_F_BL="+"; _TUI_F_BR="+"
         _TUI_F_H="-";  _TUI_F_V="|";  _TUI_F_ELL="..."
     else
@@ -90,7 +99,7 @@ _tui_frame_unicode_ok() { tui_unicode_ok; }
 # colour module decides separately, at source time, by a different rule. Two
 # policies is one too many, and the one that knows about this session wins.
 _tui_frame_styles() {
-    if (( ${TUI_COLOR:-0} == 1 )); then
+    if [ "${TUI_COLOR:-0}" -eq 1 ]; then
         _TUI_F_DIM="$DIM"; _TUI_F_BOLD="$BOLD"; _TUI_F_NC="$NC"
     else
         _TUI_F_DIM=""; _TUI_F_BOLD=""; _TUI_F_NC=""
@@ -106,18 +115,23 @@ _tui_frame_width() {
     # Whatever the last probe found. Re-measuring here would fork an stty for
     # every frame drawn, and would overwrite a size a caller set deliberately --
     # which is how this gets tested at widths no real terminal is.
-    [[ -n "${TUI_COLS:-}" ]] || tui_size 2>/dev/null || true
+    [ -n "${TUI_COLS:-}" ] || tui_size 2>/dev/null || true
     w="${TUI_COLS:-80}"
-    [[ "$w" =~ ^[0-9]+$ ]] || w=80
-    (( w > 100 )) && w=100
-    (( w < 1 ))   && w=1
+    # A run of digits, and at least one. There is no `=~` here, and a
+    # `case` cannot count repetitions, so the test is that nothing in it is
+    # not a digit.
+    case "$w" in
+        ''|*[!0-9]*) w=80 ;;
+    esac
+    [ "$w" -gt 100 ] && w=100
+    [ "$w" -lt 1 ] && w=1
     printf '%d' $(( w - 2 ))
 }
 
 # Cheap repeat, without seq or a loop per character.
 _tui_frame_rep() {
     local c="$1" n="$2" out=""
-    (( n > 0 )) || return 0
+    [ "$n" -gt 0 ] || return 0
     printf -v out '%*s' "$n" ''
     printf '%s' "${out// /$c}"
 }
@@ -145,18 +159,18 @@ tui_frame_open() {
     _tui_frame_styles
 
     _TUI_FRAME_PLAIN=0
-    if ! tui_is_tty || (( TUI_FRAME_WIDTH + 2 < _TUI_FRAME_MIN )); then
+    if ! tui_is_tty || [ "$(( TUI_FRAME_WIDTH + 2 ))" -lt "$_TUI_FRAME_MIN" ]; then
         # In a log, and on a screen too narrow to hold a border and words both,
         # a frame is a heading. The information is the same; the shape is what
         # that medium uses for it.
         _TUI_FRAME_PLAIN=1
-        [[ -n "$title" ]] && printf '%s\n' "$title"
+        [ -n "$title" ] && printf '%s\n' "$title"
         return 0
     fi
 
     local bar t_len
     t_len="$(tui_frame_vis "$title")"
-    if [[ -n "$title" ]] && (( t_len + 4 <= TUI_FRAME_WIDTH )); then
+    if [ -n "$title" ] && [ "$(( t_len + 4 ))" -le "$TUI_FRAME_WIDTH" ]; then
         bar="$(_tui_frame_rep "$_TUI_F_H" $(( TUI_FRAME_WIDTH - t_len - 3 )))"
         printf '%s%s%s %s%s%s %s%s%s\n' \
             "${_TUI_F_DIM}" "$_TUI_F_TL" "$_TUI_F_H" "${_TUI_F_NC}${_TUI_F_BOLD}" \
@@ -175,24 +189,32 @@ tui_frame_open() {
 # Usage: tui_frame_say <text>
 tui_frame_say() {
     local text="${1:-}" line
-    if (( _TUI_FRAME_OPEN == 0 )) || (( _TUI_FRAME_PLAIN == 1 )); then
+    if [ "$_TUI_FRAME_OPEN" -eq 0 ] || [ "$_TUI_FRAME_PLAIN" -eq 1 ]; then
         printf '%s\n' "$text"
         return 0
     fi
-    if [[ "$text" == *$'\n'* ]]; then
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            _tui_frame_row "$line"
-        done <<< "$text"
-        return 0
-    fi
+    # A here-document rather than a here-string, which is bash's. Both feed
+    # the loop from a string without a subshell, so the rows still reach the
+    # frame's own counters; a pipe would put the loop in a subshell and the
+    # frame would close believing it had drawn nothing.
+    case "$text" in
+        *"$_TUI_FRAME_NL"*)
+            while IFS= read -r line || [ -n "$line" ]; do
+                _tui_frame_row "$line"
+            done <<EOF
+$text
+EOF
+            return 0
+            ;;
+    esac
     _tui_frame_row "$text"
 }
 
 _tui_frame_row() {
     local text="${1:-}" inner=$(( TUI_FRAME_WIDTH - 2 )) len pad
-    (( inner < 1 )) && inner=1
+    [ "$inner" -lt 1 ] && inner=1
     len="$(tui_frame_vis "$text")"
-    if (( len > inner )); then
+    if [ "$len" -gt "$inner" ]; then
         text="$(tui_cut "$text" "$inner" "$_TUI_F_ELL")"
         len="$(tui_frame_vis "$text")"
     fi
@@ -206,9 +228,9 @@ _tui_frame_row() {
 # Close the frame.
 # Usage: tui_frame_close
 tui_frame_close() {
-    if (( _TUI_FRAME_OPEN == 0 )); then return 0; fi
+    if [ "$_TUI_FRAME_OPEN" -eq 0 ]; then return 0; fi
     _TUI_FRAME_OPEN=0
-    if (( _TUI_FRAME_PLAIN == 1 )); then printf '\n'; return 0; fi
+    if [ "$_TUI_FRAME_PLAIN" -eq 1 ]; then printf '\n'; return 0; fi
     local bar; bar="$(_tui_frame_rep "$_TUI_F_H" "$TUI_FRAME_WIDTH")"
     printf '%s%s%s%s%s\n' "${_TUI_F_DIM}" "$_TUI_F_BL" "$bar" "$_TUI_F_BR" "${_TUI_F_NC}"
 }
@@ -221,7 +243,7 @@ tui_frame_box() {
     # `shift` with no arguments left fails and, under set -e in a caller's
     # shell, takes the whole run with it. Guarded by the count, not by a
     # redirect that hides the message without preventing the failure.
-    (( $# > 0 )) && shift
+    [ "$#" -gt 0 ] && shift
     tui_frame_open "$title"
     local l
     for l in "$@"; do tui_frame_say "$l"; done
@@ -236,12 +258,12 @@ tui_frame_box() {
 # Usage: tui_frame_foreign <command> [args...] -> returns the command's status
 tui_frame_foreign() {
     local was="$_TUI_FRAME_OPEN" rc
-    (( was == 1 )) && tui_frame_close
+    [ "$was" -eq 1 ] && tui_frame_close
     if declare -F tui_suspend >/dev/null 2>&1; then
         tui_suspend "$@"; rc=$?
     else
         "$@"; rc=$?
     fi
-    (( was == 1 )) && tui_frame_open "$_TUI_FRAME_TITLE"
+    [ "$was" -eq 1 ] && tui_frame_open "$_TUI_FRAME_TITLE"
     return "$rc"
 }
