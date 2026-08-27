@@ -7,6 +7,16 @@
 diagnostics::findings    libs/diagnostics/findings.sh
 tui::confirm             libs/tui/confirm.sh
 tui::frame               libs/tui/frame.sh
+# Reads one keypress at a time from a terminal, with a timeout short enough to
+# tell escape from the start of an escape sequence. That needs `read -n1 -d ''
+# -t`, and POSIX `read` has none of the three: it reads a line, it splits on
+# `IFS`, and it waits. There is no POSIX rewrite of this, only a different
+# program built on `dd bs=1` and `stty`, which is a different module rather than
+# this one converted.
+#
+# So it sits behind the gate rather than on the floor, which is what the third
+# layer is for.
+#[shell(bash4)]
 tui::key                 libs/tui/key.sh
 tui::layout              libs/tui/layout.sh
 tui::menu                libs/tui/menu.sh

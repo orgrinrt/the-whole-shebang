@@ -58,6 +58,23 @@ fail_on_debug = true
 fail_on_todo = false
 max_todos = 10
 
+[tests.posix_floor]
+# How much of this library a POSIX sh can read.
+#
+# The check is nutshell's, so nothing is duplicated here: it finds a real POSIX
+# shell, refuses one that accepts a bash array, and reports every file that
+# shell cannot parse. A file reached only behind a `#[shell(...)]` gate in
+# `lib.nut` is discounted, because a gate is the declaration that it is not on
+# the floor.
+#
+# `max_unreadable = -1` reports rather than blocks. The number is 12 of 15 as
+# this is written, and a gate that blocked at 12 would be a gate that never
+# fires until somebody sets it lower. Setting it is worth doing once the number
+# is somewhere a regression would be visible.
+enabled = true
+max_unreadable = -1
+exempt = []
+
 [tests.public_api_docs]
 public_api_annotation = "#[pub]"
 required_elements = ["Usage:"]
