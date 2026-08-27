@@ -4,7 +4,7 @@
 # Read before any module is loaded, so it stays a format that needs
 # no parser: the TOML one is itself a module.
 
-diagnostics              libs/diagnostics.sh
+diagnostics::findings    libs/diagnostics/findings.sh
 tui::confirm             libs/tui/confirm.sh
 tui::frame               libs/tui/frame.sh
 tui::key                 libs/tui/key.sh

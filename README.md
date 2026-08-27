@@ -5,8 +5,8 @@
 Built on [nutshell](https://github.com/orgrinrt/nutshell), but the arrangement is the
 opposite one. nutshell is a single thing you take whole: source `init`, `use` what you
 need, and every module comes along in the same install. The libraries here are meant to
-be picked apart. A script that wants findings and a verdict takes `diagnostics` and
-nothing else, and never has to learn that the rest is even here.
+be picked apart. A script that wants findings and a verdict takes `diagnostics::findings`
+and nothing else, and never has to learn that the rest is even here.
 
 That is the whole idea, so if you find a library in here reaching for another one for no
 good reason, that's a bug and I'd like to hear about it.
@@ -34,7 +34,7 @@ ref = "main"
 ```bash
 #!/usr/bin/env nutshell
 
-use shebang::diagnostics
+use shebang::diagnostics::findings
 
 finding_block "version moved on a feature branch"
 finding_note  "A version moves on a release. If this PR is one, say so."
@@ -48,12 +48,12 @@ exactly where you left it.
 Modules separate with `::` the whole way down, and `lib.nut` is the file that says which
 name maps to where. Vendoring the repository works too and sources a file directly: a
 checkout at `lib/shebang/` is reached as
-`. "${0%/*}/lib/shebang/libs/diagnostics.sh"`.
+`. "${0%/*}/lib/shebang/libs/diagnostics/findings.sh"`.
 
 Every library here stops immediately if nutshell has not been initialised, and names the
 setup step, rather than letting you find out later on some undefined function.
 
-## diagnostics
+## diagnostics::findings
 
 Records severity-tagged findings through `finding_block` and `finding_judge`, with
 `finding_note` for continuation lines, and renders a verdict whose exit code a caller can
