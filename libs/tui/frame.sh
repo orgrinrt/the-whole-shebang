@@ -54,10 +54,13 @@ use color
 # State
 # -----------------------------------------------------------------------------
 
-declare -gi _TUI_FRAME_OPEN=0
-declare -g  _TUI_FRAME_TITLE=""
-declare -gi TUI_FRAME_WIDTH=0     # drawn width less the two borders
-declare -gi _TUI_FRAME_PLAIN=0    # drawing without a border at all
+# Plain assignments, not `declare -g`. `declare` is bash's, and under a POSIX
+# shell it is simply not found: the shell prints that, carries on, and the
+# variable is never set. Nothing fails at the point of the mistake.
+_TUI_FRAME_OPEN=0
+_TUI_FRAME_TITLE=""
+TUI_FRAME_WIDTH=0                 # drawn width less the two borders
+_TUI_FRAME_PLAIN=0                # drawing without a border at all
 
 # Declared here, with the safe set as the default, rather than created inside
 # whichever branch happens to run. The open flag used to be set before the
@@ -66,13 +69,13 @@ declare -gi _TUI_FRAME_PLAIN=0    # drawing without a border at all
 # open with no glyphs behind it, and the next line drawn died on an unbound
 # variable. term.sh declares all of its state at file scope for exactly
 # this reason.
-declare -g _TUI_F_TL="+" _TUI_F_TR="+" _TUI_F_BL="+" _TUI_F_BR="+"
-declare -g _TUI_F_H="-"  _TUI_F_V="|"  _TUI_F_ELL="..."
+_TUI_F_TL="+"; _TUI_F_TR="+"; _TUI_F_BL="+"; _TUI_F_BR="+"
+_TUI_F_H="-";  _TUI_F_V="|";  _TUI_F_ELL="..."
 
 # Below this there is no room for a border and the text both, so the border
 # goes and the text stays. A box wider than the screen wraps, and the right
 # edge lands under the left one.
-declare -gi _TUI_FRAME_MIN=24
+_TUI_FRAME_MIN=24
 
 # The glyphs, and the mark used when a line is cut. They travel together: an
 # ellipsis is three bytes of UTF-8, and putting one inside an ASCII border is
@@ -84,10 +87,17 @@ _tui_frame_glyphs() {
     else
         _TUI_F_TL="\u250c"; _TUI_F_TR="\u2510"; _TUI_F_BL="\u2514"; _TUI_F_BR="\u2518"
         _TUI_F_H="\u2500";  _TUI_F_V="\u2502";  _TUI_F_ELL="\u2026"
-        printf -v _TUI_F_TL '%b' "$_TUI_F_TL"; printf -v _TUI_F_TR '%b' "$_TUI_F_TR"
-        printf -v _TUI_F_BL '%b' "$_TUI_F_BL"; printf -v _TUI_F_BR '%b' "$_TUI_F_BR"
-        printf -v _TUI_F_H  '%b' "$_TUI_F_H";  printf -v _TUI_F_V  '%b' "$_TUI_F_V"
-        printf -v _TUI_F_ELL '%b' "$_TUI_F_ELL"
+        # `printf -v` is bash's, and it is the worst of these to get wrong:
+        # a POSIX shell reports an illegal option, carries on, and leaves the
+        # variable empty, so the box would draw with nothing for its corners.
+        # A substitution costs a fork each and this runs once per process.
+        _TUI_F_TL="$(printf '%b' "$_TUI_F_TL")"
+        _TUI_F_TR="$(printf '%b' "$_TUI_F_TR")"
+        _TUI_F_BL="$(printf '%b' "$_TUI_F_BL")"
+        _TUI_F_BR="$(printf '%b' "$_TUI_F_BR")"
+        _TUI_F_H="$(printf '%b' "$_TUI_F_H")"
+        _TUI_F_V="$(printf '%b' "$_TUI_F_V")"
+        _TUI_F_ELL="$(printf '%b' "$_TUI_F_ELL")"
     fi
 }
 
@@ -105,7 +115,7 @@ _tui_frame_styles() {
         _TUI_F_DIM=""; _TUI_F_BOLD=""; _TUI_F_NC=""
     fi
 }
-declare -g _TUI_F_DIM="" _TUI_F_BOLD="" _TUI_F_NC=""
+_TUI_F_DIM=""; _TUI_F_BOLD=""; _TUI_F_NC=""
 
 # How wide to draw. Never wider than the terminal: flooring the frame rather
 # than the terminal is how a 10-column console got a 20-column box, every line
@@ -128,12 +138,20 @@ _tui_frame_width() {
     printf '%d' $(( w - 2 ))
 }
 
-# Cheap repeat, without seq or a loop per character.
+# Repeat a character, without `seq` and without a process per call.
+#
+# It was `printf -v out '%*s'` and then `${out// /$c}`, which is three bash-only
+# things in two lines: the `-v`, the `*` width, and the global substitution. A
+# loop is not as clever and it runs everywhere, and the counts here are a
+# terminal's width rather than anything large.
 _tui_frame_rep() {
     local c="$1" n="$2" out=""
     [ "$n" -gt 0 ] || return 0
-    printf -v out '%*s' "$n" ''
-    printf '%s' "${out// /$c}"
+    while [ "$n" -gt 0 ]; do
+        out="${out}${c}"
+        n=$(( n - 1 ))
+    done
+    printf '%s' "$out"
 }
 
 #[pub]
@@ -259,7 +277,7 @@ tui_frame_box() {
 tui_frame_foreign() {
     local was="$_TUI_FRAME_OPEN" rc
     [ "$was" -eq 1 ] && tui_frame_close
-    if declare -F tui_suspend >/dev/null 2>&1; then
+    if command -v tui_suspend >/dev/null 2>&1; then
         tui_suspend "$@"; rc=$?
     else
         "$@"; rc=$?
