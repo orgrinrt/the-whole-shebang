@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# =============================================================================
+# the-whole-shebang/check - Run the QA checks
+# =============================================================================
+# The gate nutshell and hulilupteri both run on every change. `nut.toml` has
+# carried the thresholds since this repository started and nothing ran them, so
+# the config was decorative: three files were over the limit it sets and the
+# number nobody could see said so.
+#
+# An entry point, so it resolves nutshell itself before there is a nutshell to
+# ask.
+#
+# Usage:
+#   ./check
+# =============================================================================
+
+set -uo pipefail
+HERE="${BASH_SOURCE[0]%/*}"
+
+# shellcheck source=/dev/null
+. "$HERE/lib/find-nutshell"
+nutshell_find "" "${SHEBANG_NUTSHELL_REF:-0.4.1}" || exit 1
+
+root="${NUTSHELL_INIT%/init}"
+[[ -x "${root}/check" ]] || {
+    printf 'the nutshell at %s has no check in it\n' "$root" >&2
+    exit 1
+}
+exec "${root}/check" "$@"

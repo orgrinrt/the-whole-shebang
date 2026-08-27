@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# =============================================================================
+# the-whole-shebang/tools/absorb-cost-report - What a burst of movement costs
+# =============================================================================
+#
+# The menu absorbs a run of movement keys into one draw, which is what stops a
+# wheel event painting the list for seconds after the hand stopped. The absorb
+# loop itself calls two functions through command substitution per key, and a
+# command substitution is a fork.
+#
+# Whether that matters is a question with a number, not an opinion. This is the
+# number. A report, not a gate: the threshold nobody can justify is the reason
+# this is not a lint.
+#
+# The negative control is the point. Both arms do the same arithmetic on the
+# same input and differ only in whether the result comes back through a fork,
+# so a run where the two are the same says the instrument is not measuring what
+# it claims and the numbers below it mean nothing.
+#
+# Usage:
+#   tools/absorb-cost-report [keys]
+# =============================================================================
+
+set -uo pipefail
+
+keys="${1:-200}"
+
+# The shape the menu's absorb loop uses: a value comes back out of a subshell.
+_through_a_fork() {
+    local n="$1" i cursor=0
+    for (( i = 0; i < n; i++ )); do
+        cursor="$(_step "$cursor")"
+    done
+    printf '%d' "$cursor"
+}
+
+# The same arithmetic, the result left in a variable.
+_in_this_shell() {
+    local n="$1" i
+    _STEP_AT=0
+    for (( i = 0; i < n; i++ )); do
+        _step_into "$_STEP_AT"
+    done
+    printf '%d' "$_STEP_AT"
+}
+
+_step()      { printf '%d' "$(( $1 + 1 ))"; }
+_step_into() { _STEP_AT=$(( $1 + 1 )); }
+
+# Seconds resolution is too coarse for one run, so each arm runs a batch and
+# the batch is what is timed.
+_time_batch() {
+    local fn="$1" n="$2" rounds="$3" i
+    local start end
+    start="$(date +%s)"
+    for (( i = 0; i < rounds; i++ )); do "$fn" "$n" >/dev/null; done
+    end="$(date +%s)"
+    printf '%d' "$(( end - start ))"
+}
+
+rounds=20
+printf 'a burst of %s movement keys, %s rounds\n\n' "$keys" "$rounds"
+
+forked="$(_time_batch _through_a_fork "$keys" "$rounds")"
+inline="$(_time_batch _in_this_shell  "$keys" "$rounds")"
+
+printf '  through a fork   %ss\n' "$forked"
+printf '  in this shell    %ss\n' "$inline"
+printf '\n'
+
+# The control. If these are not different, the instrument is measuring
+# something other than the fork and every number above it is noise.
+if (( forked <= inline )); then
+    printf 'the two arms measured the same. The fork is not what this is timing,\n'
+    printf 'so the numbers above say nothing and must not be quoted.\n'
+    exit 1
+fi
+
+# Microseconds, because a fork is well under a millisecond on anything modern
+# and integer division at millisecond resolution reports every one of them as
+# zero.
+per_fork_us=$(( (forked - inline) * 1000000 / (rounds * keys) ))
+printf 'a fork costs about %sus here, so absorbing a %s key burst spends\n' \
+    "$per_fork_us" "$keys"
+printf 'roughly %sms in forks the loop does not have to spend.\n\n' \
+    "$(( per_fork_us * keys / 1000 ))"
+printf 'Measured on: %s %s, bash %s, %s rounds of %s.\n' \
+    "$(uname -s)" "$(uname -m)" "${BASH_VERSION%%(*}" "$rounds" "$keys"
+printf 'A machine this tool is meant for is slower than the one it was run on.\n'
+

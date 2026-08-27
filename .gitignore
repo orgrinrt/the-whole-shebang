@@ -1,0 +1,6 @@
+
+# The vendored fallback. `nutshell_find` looks here last, for a machine with no
+# network that is being rescued, so somebody may legitimately drop a nutshell
+# in. It is never committed: a copy in the tree is a second version that drifts
+# from the machine's in silence, which is what `lib/find-nutshell` replaced.
+/lib/nutshell/
