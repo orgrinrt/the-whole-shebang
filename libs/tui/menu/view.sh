@@ -38,12 +38,6 @@ _tui_menu_match() {
     [[ "${hay,,}" == *"${want,,}"* ]]
 }
 
-#[pub]
-# Rebuild the view for the current filter.
-#
-# A heading survives only when something under it does, so filtering does not
-# leave a screen of section titles with nothing beneath them.
-# Usage: tui_menu_refilter -> rebuilds TUI_MENU_VIEW
 # Whether a row survives the current view: the search phrase, and whether
 # unavailable rows are being shown at all.
 _tui_menu_shown() {
@@ -55,6 +49,12 @@ _tui_menu_shown() {
     return 0
 }
 
+#[pub]
+# Rebuild the view for the current filter.
+#
+# A heading survives only when something under it does, so filtering does not
+# leave a screen of section titles with nothing beneath them.
+# Usage: tui_menu_refilter -> rebuilds TUI_MENU_VIEW
 tui_menu_refilter() {
     TUI_MENU_VIEW=(); TUI_MENU_VHEAD=()
 

@@ -16,7 +16,7 @@ HERE="${BASH_SOURCE[0]%/*}"
 
 # shellcheck source=/dev/null
 . "$HERE/lib/find-nutshell"
-nutshell_find "" "${SHEBANG_NUTSHELL_REF:-dev}" || exit 1
+nutshell_find "" "${SHEBANG_NUTSHELL_REF:-0.4.1}" || exit 1
 # shellcheck source=/dev/null
 . "$NUTSHELL_INIT" || exit 1
 
