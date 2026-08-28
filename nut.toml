@@ -76,8 +76,8 @@ max_todos = 10
 # `lib.nut` is discounted, because a gate is the declaration that it is not on
 # the floor.
 #
-# `max_unreadable = -1` reports rather than blocks. The number is 12 of 15 as
-# this is written, and a gate that blocked at 12 would be a gate that never
+# `max_unreadable = -1` reports rather than blocks. The number is 8 of 14 as
+# this is written, and a gate that blocked at 14 would be a gate that never
 # fires until somebody sets it lower. Setting it is worth doing once the number
 # is somewhere a regression would be visible.
 enabled = true
