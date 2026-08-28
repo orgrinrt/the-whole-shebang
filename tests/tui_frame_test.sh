@@ -281,7 +281,6 @@ it_survives_an_empty_body() {
 it_survives_a_frame_opened_before_the_terminal_was_probed() {
     local out rc
     out="$(set -u
-        . "$NUTSHELL_INIT"
         . "${BASH_SOURCE[0]%/*}/../libs/tui/term.sh"
         . "${BASH_SOURCE[0]%/*}/../libs/tui/frame.sh"
         tui_frame_open "Starting up"
@@ -303,7 +302,6 @@ it_has_usable_glyphs_before_anything_opens_a_frame() {
     # code that crashed, which makes it a test of nothing.
     local out
     out="$(set -u
-        . "$NUTSHELL_INIT"
         . "${BASH_SOURCE[0]%/*}/../libs/tui/term.sh"
         . "${BASH_SOURCE[0]%/*}/../libs/tui/frame.sh"
         printf 'v=[%s] h=[%s] tl=[%s] ell=[%s]\n' \

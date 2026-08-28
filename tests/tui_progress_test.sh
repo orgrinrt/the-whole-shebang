@@ -222,8 +222,7 @@ it_never_draws_wider_than_the_terminal() {
     TUI_TTY=1
     local c out w
     for c in 5 10 15 20 24 40 80 120; do
-        out="$(WANT_COLS=$c PROOT="$PROOT" bash -c '
-            . "$NUTSHELL_INIT" 2>/dev/null
+        out="$(WANT_COLS=$c PROOT="$PROOT" nutshell -c '
             . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
             # After sourcing: term.sh declares TUI_COLS at file scope, so a
             # value inherited from the environment is overwritten by the
@@ -245,8 +244,7 @@ it_never_draws_wider_than_the_terminal() {
 #[test]
 it_draws_a_spinner_when_the_size_is_unknown() {
     local out
-    out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$NUTSHELL_INIT" 2>/dev/null
+    out="$(WANT_COLS=40 PROOT="$PROOT" nutshell -c '
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 0 "Scanning"
@@ -261,8 +259,7 @@ it_draws_a_spinner_when_the_size_is_unknown() {
 #[test]
 it_cuts_a_long_label_with_a_mark_the_terminal_can_draw() {
     local out
-    out="$(LC_ALL=C LANG=C WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$NUTSHELL_INIT" 2>/dev/null
+    out="$(LC_ALL=C LANG=C WANT_COLS=40 PROOT="$PROOT" nutshell -c '
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 10 "T"
@@ -277,8 +274,7 @@ it_cuts_a_long_label_with_a_mark_the_terminal_can_draw() {
 #[test]
 it_uses_the_nicer_mark_where_it_renders() {
     local out
-    out="$(LC_ALL=en_US.UTF-8 TERM=xterm WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$NUTSHELL_INIT" 2>/dev/null
+    out="$(LC_ALL=en_US.UTF-8 TERM=xterm WANT_COLS=40 PROOT="$PROOT" nutshell -c '
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 10 "T"
@@ -290,8 +286,7 @@ it_uses_the_nicer_mark_where_it_renders() {
 #[test]
 it_keeps_the_percentage_when_there_is_no_room_for_a_bar() {
     local out
-    out="$(WANT_COLS=12 PROOT="$PROOT" bash -c '
-        . "$NUTSHELL_INIT" 2>/dev/null
+    out="$(WANT_COLS=12 PROOT="$PROOT" nutshell -c '
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 4 "T"
@@ -305,8 +300,7 @@ it_keeps_the_percentage_when_there_is_no_room_for_a_bar() {
 #[test]
 it_writes_no_colour_when_the_terminal_said_no_colour() {
     local out
-    out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$NUTSHELL_INIT" 2>/dev/null
+    out="$(WANT_COLS=40 PROOT="$PROOT" nutshell -c '
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         DIM=$'"'"'\033[2m'"'"'; BOLD=$'"'"'\033[1m'"'"'; GREEN=$'"'"'\033[32m'"'"'; NC=$'"'"'\033[0m'"'"'
         TUI_TTY=1; TUI_COLOR=0; TUI_COLS="${WANT_COLS}"
@@ -323,8 +317,7 @@ it_writes_no_colour_when_the_terminal_said_no_colour() {
 #[test]
 it_writes_colour_when_the_terminal_wants_it() {
     local out
-    out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$NUTSHELL_INIT" 2>/dev/null
+    out="$(WANT_COLS=40 PROOT="$PROOT" nutshell -c '
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         DIM=$'"'"'\033[2m'"'"'; BOLD=$'"'"'\033[1m'"'"'; GREEN=$'"'"'\033[32m'"'"'; NC=$'"'"'\033[0m'"'"'
         TUI_TTY=1; TUI_COLOR=1; TUI_COLS="${WANT_COLS}"
@@ -337,8 +330,7 @@ it_writes_colour_when_the_terminal_wants_it() {
 #[test]
 it_says_how_long_it_took() {
     local out
-    out="$(WANT_COLS=40 PROOT="$PROOT" bash -c '
-        . "$NUTSHELL_INIT" 2>/dev/null
+    out="$(WANT_COLS=40 PROOT="$PROOT" nutshell -c '
         . "$PROOT/libs/tui/term.sh"; . "$PROOT/libs/tui/progress.sh"
         TUI_TTY=1; TUI_COLS="${WANT_COLS}"
         tui_progress_open 1 "T"; tui_progress_step a; tui_progress_close

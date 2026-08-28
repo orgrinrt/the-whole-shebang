@@ -94,3 +94,14 @@ color = "auto"
 verbosity = "normal"
 show_passing = false
 show_summary = true
+
+# What this package is, for anything that resolves it by name. The version is
+# the package's own, distinct from `[meta] version`, which names the schema the
+# manifest is written against.
+[package]
+name = "the-whole-shebang"
+version = "0.2.0"
+description = "Standalone shell libraries built on nutshell, each taken on its own."
+license = "MPL-2.0"
+repository = "https://github.com/orgrinrt/the-whole-shebang"
+keywords = ["bash", "shell", "posix", "tui", "library"]
