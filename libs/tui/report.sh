@@ -29,29 +29,36 @@
 #   exit "$(tui_report_exit)"
 # =============================================================================
 
-[[ -n "${_SHEBANG_TUI_REPORT_SH:-}" ]] && return 0
+[ -n "${_SHEBANG_TUI_REPORT_SH:-}" ] && return 0
 readonly _SHEBANG_TUI_REPORT_SH=1
 
-if ! declare -F use >/dev/null 2>&1; then
+if ! command -v use >/dev/null 2>&1; then
     printf 'tui: source nutshell first (. path/to/nutshell/init)\n' >&2
     return 1
 fi
 
-use color
+use color list
 
 # -----------------------------------------------------------------------------
 # State
 # -----------------------------------------------------------------------------
 
-declare -ga TUI_REPORT_STATUS=()
-declare -ga TUI_REPORT_NAME=()
-declare -ga TUI_REPORT_NOTE=()
+# Three parallel lists rather than three bash arrays.
+#
+# `list` is nutshell's, and it has a POSIX half, which a `declare -ga` does
+# not. The shape is the same: one row is the same index in all three, appended
+# together and read together.
+list_new TUI_REPORT_STATUS
+list_new TUI_REPORT_NAME
+list_new TUI_REPORT_NOTE
 
 #[pub]
 # Start a fresh report.
 # Usage: tui_report_reset
 tui_report_reset() {
-    TUI_REPORT_STATUS=(); TUI_REPORT_NAME=(); TUI_REPORT_NOTE=()
+    list_new TUI_REPORT_STATUS
+    list_new TUI_REPORT_NAME
+    list_new TUI_REPORT_NOTE
 }
 
 #[pub]
@@ -62,18 +69,22 @@ tui_report_reset() {
 tui_report_row() {
     local st="${1:-info}" name="${2:-}" note="${3:-}"
     case "$st" in ok|warn|fail|skip|info) ;; *) st="info" ;; esac
-    TUI_REPORT_STATUS+=("$st")
-    TUI_REPORT_NAME+=("$name")
-    TUI_REPORT_NOTE+=("$note")
+    list_push TUI_REPORT_STATUS "$st"
+    list_push TUI_REPORT_NAME "$name"
+    list_push TUI_REPORT_NOTE "$note"
 }
 
 #[pub]
 # How many rows carry a status.
 # Usage: tui_report_count <status> -> a number
 tui_report_count() {
-    local want="${1:-}" s n=0
-    for s in ${TUI_REPORT_STATUS[@]+"${TUI_REPORT_STATUS[@]}"}; do
-        [[ "$s" == "$want" ]] && n=$(( n + 1 ))
+    local want="${1:-}" s n=0 i total
+    total="$(list_len TUI_REPORT_STATUS)"
+    i=0
+    while [ "$i" -lt "$total" ]; do
+        list_read s TUI_REPORT_STATUS "$i"
+        [ "$s" = "$want" ] && n=$(( n + 1 ))
+        i=$(( i + 1 ))
     done
     printf '%d' "$n"
 }
@@ -82,12 +93,16 @@ tui_report_count() {
 # The worst thing in the report, or `ok` when there is nothing in it at all.
 # Usage: tui_report_worst -> fail | warn | ok
 tui_report_worst() {
-    local s worst="ok"
-    for s in ${TUI_REPORT_STATUS[@]+"${TUI_REPORT_STATUS[@]}"}; do
+    local s worst="ok" i total
+    total="$(list_len TUI_REPORT_STATUS)"
+    i=0
+    while [ "$i" -lt "$total" ]; do
+        list_read s TUI_REPORT_STATUS "$i"
         case "$s" in
             fail) printf 'fail'; return 0 ;;
             warn) worst="warn" ;;
         esac
+        i=$(( i + 1 ))
     done
     printf '%s' "$worst"
 }
@@ -110,10 +125,10 @@ tui_report_exit() {
 # library having blanked them, by a different rule, at the moment it was
 # sourced. That is not the same as being safe in a pipe, and a test asserting
 # it was safe could only pass by blanking the variables itself.
-declare -g _TUI_R_DIM="" _TUI_R_BOLD="" _TUI_R_RED="" _TUI_R_GREEN="" \
+_TUI_R_DIM="" _TUI_R_BOLD="" _TUI_R_RED="" _TUI_R_GREEN="" \
            _TUI_R_YELLOW="" _TUI_R_NC=""
 _tui_report_styles() {
-    if (( ${TUI_COLOR:-0} == 1 )) && tui_is_tty; then
+    if [ "$(( ${TUI_COLOR:-0} == 1 ))" -ne 0 ] && tui_is_tty; then
         _TUI_R_DIM="$DIM"; _TUI_R_BOLD="$BOLD"; _TUI_R_NC="$NC"
         _TUI_R_RED="$RED"; _TUI_R_GREEN="$GREEN"; _TUI_R_YELLOW="$YELLOW"
     else
@@ -154,60 +169,74 @@ tui_report_run() {
 tui_report_show() {
     local title="${1:-}" i n w=0 len
     _tui_report_styles
-    n="${#TUI_REPORT_STATUS[@]}"
+    n="$(list_len TUI_REPORT_STATUS)"
 
-    if (( n == 0 )); then
-        [[ -n "$title" ]] && printf '%s\n' "$title"
+    if [ "$n" -eq 0 ]; then
+        [ -n "$title" ] && printf '%s\n' "$title"
         printf 'Nothing was checked.\n'
         return 0
     fi
 
     # One pass to find the widest name, so the notes line up. A ragged right
     # column is the difference between a table and a list of sentences.
-    for (( i = 0; i < n; i++ )); do
-        len="${#TUI_REPORT_NAME[$i]}"
-        (( len > w )) && w="$len"
+    local _nm
+    i=0
+    while [ "$i" -lt "$n" ]; do
+        list_read _nm TUI_REPORT_NAME "$i"
+        len="${#_nm}"
+        [ "$len" -gt "$w" ] && w="$len"
+        i=$(( i + 1 ))
     done
     # Capped, so one pathological name cannot push every note off the right of
     # the screen. A name longer than the cap is cut rather than allowed to
     # overrun its column: %-*s pads a short value but does not shorten a long
     # one, so without the cut the row is wider than the header promised.
-    (( w > 32 )) && w=32
+    [ "$w" -gt 32 ] && w=32
 
-    [[ -n "$title" ]] && printf '\n%s%s%s\n\n' "$_TUI_R_BOLD" "$title" "$_TUI_R_NC"
+    [ -n "$title" ] && printf '\n%s%s%s\n\n' "$_TUI_R_BOLD" "$title" "$_TUI_R_NC"
 
-    for (( i = 0; i < n; i++ )); do
-        local nm="${TUI_REPORT_NAME[$i]}"
-        (( ${#nm} > w )) && nm="${nm:0:$(( w - 1 ))}+"
+    local nm st nt
+    i=0
+    while [ "$i" -lt "$n" ]; do
+        list_read nm TUI_REPORT_NAME "$i"
+        list_read st TUI_REPORT_STATUS "$i"
+        list_read nt TUI_REPORT_NOTE "$i"
+        # `${nm:0:n}` is a bash substring; POSIX `printf` takes a precision.
+        [ "${#nm}" -gt "$w" ] && nm="$(printf '%.*s+' "$(( w - 1 ))" "$nm")"
         printf '  %s  %-*s  %s%s%s\n' \
-            "$(_tui_report_mark "${TUI_REPORT_STATUS[$i]}")" \
+            "$(_tui_report_mark "$st")" \
             "$w" "$nm" \
-            "$_TUI_R_DIM" "${TUI_REPORT_NOTE[$i]}" "$_TUI_R_NC"
+            "$_TUI_R_DIM" "$nt" "$_TUI_R_NC"
+        i=$(( i + 1 ))
     done
 
     local ok warn fail skip
     ok="$(tui_report_count ok)";     warn="$(tui_report_count warn)"
     fail="$(tui_report_count fail)"; skip="$(tui_report_count skip)"
     printf '\n  %d checked' "$n"
-    (( fail > 0 )) && printf ', %s%d failed%s' "$_TUI_R_RED" "$fail" "$_TUI_R_NC"
-    (( warn > 0 )) && printf ', %s%d worth a look%s' "$_TUI_R_YELLOW" "$warn" "$_TUI_R_NC"
-    (( skip > 0 )) && printf ', %d not applicable' "$skip"
-    (( fail == 0 && warn == 0 )) && printf ', %snothing wrong%s' "$_TUI_R_GREEN" "$_TUI_R_NC"
+    [ "$fail" -gt 0 ] && printf ', %s%d failed%s' "$_TUI_R_RED" "$fail" "$_TUI_R_NC"
+    [ "$warn" -gt 0 ] && printf ', %s%d worth a look%s' "$_TUI_R_YELLOW" "$warn" "$_TUI_R_NC"
+    [ "$skip" -gt 0 ] && printf ', %d not applicable' "$skip"
+    { [ "$fail" -eq 0 ] && [ "$warn" -eq 0 ]; } && printf ', %snothing wrong%s' "$_TUI_R_GREEN" "$_TUI_R_NC"
     printf '\n'
 
     # And again, underneath. By the time thirty checks have run, the one that
     # failed is off the top of the screen.
-    if (( fail > 0 || warn > 0 )); then
+    if [ "$fail" -gt 0 ] || [ "$warn" -gt 0 ]; then
         printf '\n%sWhat to look at%s\n\n' "$_TUI_R_BOLD" "$_TUI_R_NC"
-        for (( i = 0; i < n; i++ )); do
-            case "${TUI_REPORT_STATUS[$i]}" in
+        i=0
+        while [ "$i" -lt "$n" ]; do
+            list_read st TUI_REPORT_STATUS "$i"
+            i=$(( i + 1 ))
+            case "$st" in
                 fail|warn) ;;
                 *) continue ;;
             esac
-            printf '  %s  %s\n' \
-                "$(_tui_report_mark "${TUI_REPORT_STATUS[$i]}")" "${TUI_REPORT_NAME[$i]}"
-            [[ -n "${TUI_REPORT_NOTE[$i]}" ]] \
-                && printf '        %s%s%s\n' "$_TUI_R_DIM" "${TUI_REPORT_NOTE[$i]}" "$_TUI_R_NC"
+            list_read nm TUI_REPORT_NAME "$(( i - 1 ))"
+            list_read nt TUI_REPORT_NOTE "$(( i - 1 ))"
+            printf '  %s  %s\n' "$(_tui_report_mark "$st")" "$nm"
+            [ -n "$nt" ] \
+                && printf '        %s%s%s\n' "$_TUI_R_DIM" "$nt" "$_TUI_R_NC"
         done
     fi
     return 0
