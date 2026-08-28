@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env nutshell
 # =============================================================================
 # the-whole-shebang/check - Run the QA checks
 # =============================================================================
@@ -7,8 +7,8 @@
 # the config was decorative: three files were over the limit it sets and the
 # number nobody could see said so.
 #
-# An entry point, so it resolves nutshell itself before there is a nutshell to
-# ask.
+# An entry point. The launcher resolves the pin in `nut.toml` before this runs;
+# what is left here is checking that what it resolved is new enough.
 #
 # Usage:
 #   ./check
@@ -17,11 +17,29 @@
 set -uo pipefail
 HERE="${BASH_SOURCE[0]%/*}"
 
-# shellcheck source=/dev/null
-. "$HERE/lib/find-nutshell"
-nutshell_find "" "${SHEBANG_NUTSHELL_REF:-0.4.1}" || exit 1
+# The launcher already resolved the pin to get here, and exported where it
+# resolved to. Nothing in this repository needs to know how that happened.
+# The pin fails open. `_nut_resolve_pin` returning nothing is not fatal unless
+# `NUTSHELL_PIN_STRICT` is set, so an unreachable ref leaves the ambient
+# nutshell in place and this runs against whatever the machine happens to have.
+# When that one is older the failures land on this repository's own tests and
+# read as a defect here; when it is newer they do not land at all.
+#
+# `lib/find-nutshell` skipped a candidate that did not satisfy the minimum, and
+# its own comment called that "the whole of it". Deleting the file took the
+# capability with it, so the floor is stated here instead. Inline in both entry
+# points on purpose: each has to be able to say this before trusting anything
+# it would otherwise source.
+: "${NUTSHELL_ROOT:?run this through the nutshell launcher, or install nutshell}"
+_min="0.7.0"
+if [[ "$(printf '%s\n%s\n' "$_min" "${NUTSHELL_VERSION:-0.0.0}" | sort -V | head -1)" != "$_min" ]]; then
+    printf 'this needs nutshell %s or newer, and resolved %s at %s\n' \
+        "$_min" "${NUTSHELL_VERSION:-unknown}" "$NUTSHELL_ROOT" >&2
+    printf 'the pin is `nutshell_branch` at the root of nut.toml, above the first table.\n' >&2
+    exit 1
+fi
 
-root="${NUTSHELL_INIT%/init}"
+root="${NUTSHELL_ROOT}"
 [[ -x "${root}/check" ]] || {
     printf 'the nutshell at %s has no check in it\n' "$root" >&2
     exit 1

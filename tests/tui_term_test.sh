@@ -229,14 +229,30 @@ it_refuses_a_width_of_nothing() {
 
 #[test]
 it_does_not_leave_half_a_character_behind() {
-    local body out
-    body="$(printf '\xc3\xa9%.0s' {1..20})"
-    local n
-    for n in 9 10 11 12 13 14 15 16; do
-        out="$(LC_ALL=C LC_CTYPE=C LANG=C tui_cut "$body" "$n" '...')"
-        # Decoded, not grepped: a lone lead byte is what a split leaves, and
-        # the obvious byte-class greps for it match nothing either way.
-        assert_ok python3 -c 'import sys; sys.stdin.buffer.read().decode("utf-8")' <<<"$out"
+    local body out n
+    # Not forced to `C`, and not one character repeated.
+    #
+    # This test could not fail. Under `LC_ALL=C` the shell counts bytes, so the
+    # width arithmetic and the cut use the same unit and cannot disagree, and
+    # the repair walk runs as well because `tui_unicode_ok` is false there. The
+    # body was twenty identical two-byte characters with no ASCII in it, so
+    # even the arithmetic landed on boundaries. Three separate reasons it was
+    # green, and a real split shipped underneath all of them: `tui_cut "héllo"
+    # 3` returned `h`, a lone `c3`, and the ellipsis.
+    #
+    # The locale a person actually runs in is the one that matters, and mixed
+    # widths are what put the boundary somewhere the arithmetic does not.
+    local bodies='héllo aébc 日本語x aa日bb éé日aaé'
+    local body
+    for body in $bodies; do
+        for n in 2 3 4 5 6 7 8; do
+            out="$(tui_cut "$body" "$n" '...')"
+            assert_ok python3 -c 'import sys; sys.stdin.buffer.read().decode("utf-8")' <<<"$out"
+            # And again where the shell counts bytes, which is the case the
+            # repair walk exists for.
+            out="$(LC_ALL=C LC_CTYPE=C LANG=C tui_cut "$body" "$n" '...')"
+            assert_ok python3 -c 'import sys; sys.stdin.buffer.read().decode("utf-8")' <<<"$out"
+        done
     done
 }
 
@@ -278,12 +294,12 @@ it_knows_about_the_terminal_without_being_asked_first() {
 import pty, os, sys
 root = sys.argv[1]
 script = (
-    'cd %s; . "$NUTSHELL_INIT"; . libs/tui/term.sh; . libs/tui/report.sh; '
+    'cd %s; . libs/tui/term.sh; . libs/tui/report.sh; '
     'tui_report_reset; tui_report_row fail a b; '
     'printf "escapes:%%d\\n" "$(tui_report_show T | grep -c $\'\\x1b\')"' % root
 )
 buf = []
-pty.spawn(["bash", "-c", script], lambda fd: (lambda d: (buf.append(d), d)[1])(os.read(fd, 1024)))
+pty.spawn(["nutshell", "-c", script], lambda fd: (lambda d: (buf.append(d), d)[1])(os.read(fd, 1024)))
 print(b"".join(buf).decode(errors="replace"))
 PY
 )"
@@ -295,9 +311,13 @@ PY
 it_still_writes_no_colour_into_a_pipe() {
     # The other direction of the same flag, and the one that matters for a log.
     local out
-    out="$(cd "$TROOT" && bash -c '
-        . "$NUTSHELL_INIT"; . libs/tui/term.sh; . libs/tui/report.sh
+    out="$(cd "$TROOT" && nutshell -c '
+        . libs/tui/term.sh; . libs/tui/report.sh
         tui_report_reset; tui_report_row fail a b
         tui_report_show T')"
+    # The row has to have rendered, or "no colour" is true of an empty string
+    # and this passes having run nothing. It could: `nutshell -c` needs the
+    # launcher on PATH, where `bash -c` needed nothing at all.
+    assert_ok grep -q 'a' <<<"$out"
     assert_fails grep -q $'\x1b' <<<"$out"
 }

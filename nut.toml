@@ -8,6 +8,15 @@
 # the thing it is built on.
 # =============================================================================
 
+# Which nutshell this project wants. Root level, before any table: a bare key
+# after a table header belongs to that table and is a pin nothing reads.
+#
+# `dev` rather than a version, because this library and nutshell are developed
+# together and a released tag would freeze it behind whatever landed today. A
+# branch pin is an identity rather than a floor: it means the head of dev, and
+# the launcher resolves it against the remote and keeps it fresh.
+nutshell_branch = "dev"
+
 [meta]
 # The schema's version, not this project's. `nutshell`'s
 # `examples/configs/empty.nut.toml` says so where the field is documented, and
@@ -19,7 +28,7 @@ description = "Standalone bash libraries built on nutshell, each taken on its ow
 
 [paths]
 lib_dir = "libs"
-exclude = [".git", "lib/find-nutshell", "node_modules", "vendor", "target", "dist", "build"]
+exclude = [".git", "node_modules", "vendor", "target", "dist", "build"]
 include = ["*.sh", "test"]
 
 [annotations]
@@ -58,6 +67,23 @@ fail_on_debug = true
 fail_on_todo = false
 max_todos = 10
 
+[tests.posix_floor]
+# How much of this library a POSIX sh can read.
+#
+# The check is nutshell's, so nothing is duplicated here: it finds a real POSIX
+# shell, refuses one that accepts a bash array, and reports every file that
+# shell cannot parse. A file reached only behind a `#[shell(...)]` gate in
+# `lib.nut` is discounted, because a gate is the declaration that it is not on
+# the floor.
+#
+# `max_unreadable = -1` reports rather than blocks. The number is 8 of 14 as
+# this is written, and a gate that blocked at 14 would be a gate that never
+# fires until somebody sets it lower. Setting it is worth doing once the number
+# is somewhere a regression would be visible.
+enabled = true
+max_unreadable = -1
+exempt = []
+
 [tests.public_api_docs]
 public_api_annotation = "#[pub]"
 required_elements = ["Usage:"]
@@ -68,3 +94,14 @@ color = "auto"
 verbosity = "normal"
 show_passing = false
 show_summary = true
+
+# What this package is, for anything that resolves it by name. The version is
+# the package's own, distinct from `[meta] version`, which names the schema the
+# manifest is written against.
+[package]
+name = "the-whole-shebang"
+version = "0.2.0"
+description = "Standalone bash libraries built on nutshell, each taken on its own."
+license = "MPL-2.0"
+repository = "https://github.com/orgrinrt/the-whole-shebang"
+keywords = ["bash", "shell", "posix", "tui", "library"]

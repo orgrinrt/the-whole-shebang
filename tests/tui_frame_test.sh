@@ -281,7 +281,6 @@ it_survives_an_empty_body() {
 it_survives_a_frame_opened_before_the_terminal_was_probed() {
     local out rc
     out="$(set -u
-        . "$NUTSHELL_INIT"
         . "${BASH_SOURCE[0]%/*}/../libs/tui/term.sh"
         . "${BASH_SOURCE[0]%/*}/../libs/tui/frame.sh"
         tui_frame_open "Starting up"
@@ -303,7 +302,6 @@ it_has_usable_glyphs_before_anything_opens_a_frame() {
     # code that crashed, which makes it a test of nothing.
     local out
     out="$(set -u
-        . "$NUTSHELL_INIT"
         . "${BASH_SOURCE[0]%/*}/../libs/tui/term.sh"
         . "${BASH_SOURCE[0]%/*}/../libs/tui/frame.sh"
         printf 'v=[%s] h=[%s] tl=[%s] ell=[%s]\n' \
@@ -416,4 +414,99 @@ it_writes_no_colour_when_the_terminal_said_no_colour() {
     TUI_COLOR=1
     out="$(TUI_COLS=40 tui_frame_box "T" "body")"
     assert_ok grep -q $'\x1b' <<<"$out"
+}
+
+# A POSIX shell to check against, or nothing. `sh` on macOS is bash in POSIX
+# mode and draws the box perfectly, so testing against it proves nothing.
+_frame_posix_sh() {
+    local cand
+    for cand in dash ash yash busybox-sh; do
+        command -v "$cand" >/dev/null 2>&1 || continue
+        # It has to refuse a bashism, or it is bash wearing a different name.
+        printf 'declare -A x\n' > "${TMPDIR:-/tmp}/tui-fp.$$"
+        if ! "$cand" -c ". '${TMPDIR:-/tmp}/tui-fp.$$'" >/dev/null 2>&1; then
+            rm -f "${TMPDIR:-/tmp}/tui-fp.$$"; printf '%s' "$cand"; return 0
+        fi
+        rm -f "${TMPDIR:-/tmp}/tui-fp.$$"
+    done
+    return 1
+}
+
+#[test]
+# The glyphs are real characters under a POSIX shell, not the escape text.
+#
+# This is the case that shipped. The corners were `┌` and friends handed
+# to `printf '%b'`, and `%b` understands `\uHHHH` in bash and nowhere else:
+# under `dash` it passes the six characters straight through. Every corner drew
+# as the literal `┌` and every width count was six where one was assumed,
+# so `tui_cut` was wrong too.
+#
+# It was invisible because `term.sh` does not parse under a POSIX shell yet, so
+# `tui_unicode_ok` returns 127 there and the ASCII branch is taken by accident.
+# The moment `term.sh` follows onto the floor, the accident stops.
+#
+# So this drives `_tui_frame_glyphs` directly with the unicode branch forced,
+# rather than drawing a frame and hoping the branch was reached. A test that
+# only exercises the path that already works is what let this through.
+it_uses_real_glyphs_under_a_posix_shell() {
+    local sh; sh="$(_frame_posix_sh)" || { skip "no strict POSIX shell here"; return 0; }
+    local root="${BASH_SOURCE[0]%/*}/.."
+
+    local got
+    got="$("$sh" -c '
+        # `frame.sh` returns early unless nutshell is loaded, and loading
+        # nutshell under a POSIX shell is a different problem. The guard only
+        # wants `use` to exist, and nothing in the glyph path calls it.
+        use() { return 0; }
+        . "$1"/libs/tui/frame.sh 2>/dev/null
+        _tui_frame_unicode_ok() { return 0; }
+        TUI_FRAME_ASCII=0
+        _tui_frame_glyphs
+        printf "%s%s%s" "$_TUI_F_TL" "$_TUI_F_H" "$_TUI_F_ELL"
+    ' _ "$root" 2>/dev/null)"
+
+    # The escape text must not survive into the output.
+    assert_not_contains "$got" 'u250c'
+    assert_not_contains "$got" '\'
+
+    # And it is the same bytes bash produces from the same code.
+    local want
+    want="$(bash -c '
+        # `frame.sh` returns early unless nutshell is loaded, and loading
+        # nutshell under a POSIX shell is a different problem. The guard only
+        # wants `use` to exist, and nothing in the glyph path calls it.
+        use() { return 0; }
+        . "$1"/libs/tui/frame.sh 2>/dev/null
+        _tui_frame_unicode_ok() { return 0; }
+        TUI_FRAME_ASCII=0
+        _tui_frame_glyphs
+        printf "%s%s%s" "$_TUI_F_TL" "$_TUI_F_H" "$_TUI_F_ELL"
+    ' _ "$root" 2>/dev/null)"
+    assert_eq "$got" "$want"
+}
+
+#[test]
+# The corner is one character, which is what every width calculation assumes.
+#
+# The escape-text bug made it six, and a byte count is the cheapest way to say
+# so without depending on how the shell counts characters.
+it_draws_a_corner_that_is_one_character_wide() {
+    local sh; sh="$(_frame_posix_sh)" || { skip "no strict POSIX shell here"; return 0; }
+    local root="${BASH_SOURCE[0]%/*}/.."
+
+    local n
+    n="$("$sh" -c '
+        # `frame.sh` returns early unless nutshell is loaded, and loading
+        # nutshell under a POSIX shell is a different problem. The guard only
+        # wants `use` to exist, and nothing in the glyph path calls it.
+        use() { return 0; }
+        . "$1"/libs/tui/frame.sh 2>/dev/null
+        _tui_frame_unicode_ok() { return 0; }
+        TUI_FRAME_ASCII=0
+        _tui_frame_glyphs
+        printf "%s" "$_TUI_F_TL"
+    ' _ "$root" 2>/dev/null | wc -c | tr -d ' ')"
+
+    # Three bytes of UTF-8, one character. Six would be the escape text.
+    assert_eq "$n" "3"
 }
