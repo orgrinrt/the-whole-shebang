@@ -32,10 +32,10 @@
 #   tui_end                    # or just exit; the trap covers it
 # =============================================================================
 
-[[ -n "${_SHEBANG_TUI_TERM_SH:-}" ]] && return 0
+[ -n "${_SHEBANG_TUI_TERM_SH:-}" ] && return 0
 readonly _SHEBANG_TUI_TERM_SH=1
 
-if ! declare -F use >/dev/null 2>&1; then
+if ! command -v use >/dev/null 2>&1; then
     printf 'tui: source nutshell first (. path/to/nutshell/init)\n' >&2
     return 1
 fi
@@ -44,18 +44,22 @@ fi
 # State
 # -----------------------------------------------------------------------------
 
-declare -gi TUI_TTY=0        # is there a terminal to draw on
-declare -gi TUI_COLOR=0      # may we use colour
+# The escape character, as a value. `$'\033'` is a bash spelling and this file
+# is read by a POSIX shell.
+_TUI_ESC="$(printf '\033')"
+
+TUI_TTY=0        # is there a terminal to draw on
+TUI_COLOR=0      # may we use colour
 
 # Deliberately NOT integer-typed. An integer assignment is an arithmetic
 # evaluation, so `TUI_ROWS="$LINES"` with a non-numeric LINES treats the value
 # as a variable name and dies under set -u. These take whatever stty and the
 # environment hand over, which is exactly the untrusted case.
-declare -g TUI_ROWS=24
-declare -g TUI_COLS=80
+TUI_ROWS=24
+TUI_COLS=80
 
 _TUI_STTY_SAVED=""
-declare -gi _TUI_ACTIVE=0
+_TUI_ACTIVE=0
 
 # -----------------------------------------------------------------------------
 # Capability
@@ -66,11 +70,11 @@ declare -gi _TUI_ACTIVE=0
 # only when reading the flags without entering a screen.
 # Usage: tui_probe -> sets TUI_TTY, TUI_COLOR, TUI_ROWS, TUI_COLS
 tui_probe() {
-    if [[ -t 0 && -t 1 ]]; then TUI_TTY=1; else TUI_TTY=0; fi
+    if [ -t 0 ] && [ -t 1 ]; then TUI_TTY=1; else TUI_TTY=0; fi
 
     # NO_COLOR is honoured because it is the one convention everyone agreed on,
     # and TERM=dumb is the other half of the same question.
-    if [[ $TUI_TTY -eq 1 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
+    if [ "$TUI_TTY" -eq 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
         TUI_COLOR=1
     else
         TUI_COLOR=0
@@ -84,7 +88,7 @@ tui_probe() {
 # ask the user something has to answer first, named here so each one does not
 # reimplement it against the flag and drift.
 # Usage: tui_is_tty -> returns 0 when there is a terminal
-tui_is_tty() { [[ $TUI_TTY -eq 1 ]]; }
+tui_is_tty() { [ $TUI_TTY -eq 1 ]; }
 
 #[pub]
 # Re-read the terminal dimensions. Armed on WINCH by `tui_begin`, so a caller
@@ -92,7 +96,7 @@ tui_is_tty() { [[ $TUI_TTY -eq 1 ]]; }
 # Usage: tui_size -> sets TUI_ROWS and TUI_COLS
 tui_size() {
     local sz
-    if [[ $TUI_TTY -eq 1 ]] && sz="$(stty size 2>/dev/null)"; then
+    if [ $TUI_TTY -eq 1 ] && sz="$(stty size 2>/dev/null)"; then
         TUI_ROWS="${sz%% *}"
         TUI_COLS="${sz##* }"
     else
@@ -101,8 +105,10 @@ tui_size() {
     fi
     # A zero would divide by zero in a pager calculation later, which is a
     # crash at the worst possible moment rather than a wrong number.
-    [[ "$TUI_ROWS" =~ ^[0-9]+$ && $TUI_ROWS -gt 0 ]] || TUI_ROWS=24
-    [[ "$TUI_COLS" =~ ^[0-9]+$ && $TUI_COLS -gt 0 ]] || TUI_COLS=80
+    case "$TUI_ROWS" in ''|*[!0-9]*) TUI_ROWS=24 ;; esac
+    [ "$TUI_ROWS" -gt 0 ] || TUI_ROWS=24
+    case "$TUI_COLS" in ''|*[!0-9]*) TUI_COLS=80 ;; esac
+    [ "$TUI_COLS" -gt 0 ] || TUI_COLS=80
 }
 
 # -----------------------------------------------------------------------------
@@ -111,7 +117,7 @@ tui_size() {
 # All of them go through here, which is the single place the no-terminal case
 # is handled. Nothing below writes an escape byte directly.
 
-_tui_esc() { [[ $TUI_TTY -eq 1 ]] && printf '\033%s' "$1"; return 0; }
+_tui_esc() { [ $TUI_TTY -eq 1 ] && printf '\033%s' "$1"; return 0; }
 
 #[pub]
 # Switch to the alternate screen, so the user's scrollback survives the run.
@@ -158,8 +164,8 @@ tui_move() { _tui_esc "[${1};${2}H"; }
 # state is always the user's own rather than our own from a moment ago.
 # Usage: tui_raw_on
 tui_raw_on() {
-    [[ $TUI_TTY -eq 1 ]] || return 0
-    [[ -n "$_TUI_STTY_SAVED" ]] && return 0
+    [ $TUI_TTY -eq 1 ] || return 0
+    [ -n "$_TUI_STTY_SAVED" ] && return 0
     _TUI_STTY_SAVED="$(stty -g 2>/dev/null)" || return 0
     # -icanon with min 1 makes a read return after exactly one byte rather than
     # waiting for a newline, which is what reading a keypress means.
@@ -172,7 +178,7 @@ tui_raw_on() {
 # than leaving it with settings that are merely not the ones it had.
 # Usage: tui_raw_off
 tui_raw_off() {
-    [[ -n "$_TUI_STTY_SAVED" ]] || return 0
+    [ -n "$_TUI_STTY_SAVED" ] || return 0
     stty "$_TUI_STTY_SAVED" 2>/dev/null || stty sane 2>/dev/null || true
     _TUI_STTY_SAVED=""
 }
@@ -186,7 +192,7 @@ tui_raw_off() {
 # it runs from the trap and possibly again on the way out.
 # Usage: tui_restore
 tui_restore() {
-    [[ $_TUI_ACTIVE -eq 1 ]] || return 0
+    [ $_TUI_ACTIVE -eq 1 ] || return 0
     _TUI_ACTIVE=0
     tui_raw_off
     tui_cursor_show
@@ -230,7 +236,7 @@ tui_suspend() {
     local was=$_TUI_ACTIVE rc=0
     tui_restore
     "$@" || rc=$?
-    if [[ $was -eq 1 ]]; then
+    if [ $was -eq 1 ]; then
         _TUI_ACTIVE=1
         tui_alt_screen_on
         tui_cursor_hide
@@ -251,16 +257,16 @@ tui_suspend() {
 #
 # All empty when the terminal said no colour, so a caller never has to ask.
 
-declare -g TUI_C_OK="" TUI_C_WARN="" TUI_C_BAD="" TUI_C_OFF=""
-declare -g TUI_C_KEY="" TUI_C_HEAD="" TUI_C_MUTE="" TUI_C_SEL="" TUI_C_OFFTXT=""
-declare -g TUI_C_END=""
+TUI_C_OK="" TUI_C_WARN="" TUI_C_BAD="" TUI_C_OFF=""
+TUI_C_KEY="" TUI_C_HEAD="" TUI_C_MUTE="" TUI_C_SEL="" TUI_C_OFFTXT=""
+TUI_C_END=""
 
 #[pub]
 # Fill the palette from the colour library, gated on what the terminal said.
 # Called by tui_probe; call it again if the colour variables change under you.
 # Usage: tui_palette
 tui_palette() {
-    if (( ${TUI_COLOR:-0} == 1 )); then
+    if [ "$(( ${TUI_COLOR:-0} == 1 ))" -ne 0 ]; then
         TUI_C_OK="${GREEN:-}"          # already true, finished, healthy
         TUI_C_WARN="${YELLOW:-}"       # worth a look
         TUI_C_BAD="${RED:-}"           # broken, or about to destroy something
@@ -305,7 +311,7 @@ tui_unicode_ok() {
         *UTF-8*|*utf8*|*UTF8*|*utf-8*) ;;
         *) return 1 ;;
     esac
-    [[ "${TERM:-}" != "linux" ]]
+    [ "${TERM:-}" != "linux" ]
 }
 
 #[pub]
@@ -321,9 +327,9 @@ tui_ellipsis() {
 # not a lead byte. Read under LC_ALL=C, where bash indexes bytes.
 _tui_lead_len() {
     local n="$1"
-    if   (( n >= 240 && n <= 247 )); then printf '4'
-    elif (( n >= 224 && n <= 239 )); then printf '3'
-    elif (( n >= 192 && n <= 223 )); then printf '2'
+    if   [ "$(( n >= 240 && n <= 247 ))" -ne 0 ]; then printf '4'
+    elif [ "$(( n >= 224 && n <= 239 ))" -ne 0 ]; then printf '3'
+    elif [ "$(( n >= 192 && n <= 223 ))" -ne 0 ]; then printf '2'
     else printf '0'; fi
 }
 #[pub]
@@ -338,16 +344,28 @@ _tui_lead_len() {
 # costs more than walking a short string, and a menu is a hundred short ones.
 # Usage: tui_vis <text> -> a number
 tui_vis() {
-    local s="$1" n=0 i c
+    local s="$1" n=0 c rest
     # The common case, and the reason this is cheap: no escape at all.
-    [[ "$s" != *$'\033'* ]] && { printf '%d' "${#s}"; return 0; }
-    for (( i = 0; i < ${#s}; i++ )); do
-        c="${s:i:1}"
-        if [[ "$c" == $'\033' ]]; then
-            i=$(( i + 1 ))
-            [[ "${s:i:1}" == "[" || "${s:i:1}" == "]" ]] && i=$(( i + 1 ))
+    case "$s" in *"$_TUI_ESC"*) ;; *) printf '%d' "${#s}"; return 0 ;; esac
+
+    # Chopped from the front rather than indexed. `${s:i:1}` is a bash
+    # substring and the C-style `for` around it is bash too, but the reason to
+    # chop rather than translate the index is the `continue` below: in the old
+    # loop the header advanced `i`, and a `while` written to look the same puts
+    # the advance after the `continue` where it never runs. Chopping advances
+    # before the branch, so there is no order to get wrong.
+    rest="$s"
+    while [ -n "$rest" ]; do
+        c="${rest%"${rest#?}"}"
+        rest="${rest#?}"
+        if [ "$c" = "$_TUI_ESC" ]; then
+            case "$rest" in "["*|"]"*) rest="${rest#?}" ;; esac
             # A CSI ends on a letter; everything before it is parameters.
-            while (( i < ${#s} )) && [[ ! "${s:i:1}" =~ [A-Za-z] ]]; do i=$(( i + 1 )); done
+            while [ -n "$rest" ]; do
+                c="${rest%"${rest#?}"}"
+                rest="${rest#?}"
+                case "$c" in [A-Za-z]) break ;; esac
+            done
             continue
         fi
         n=$(( n + 1 ))
@@ -365,28 +383,57 @@ tui_vis() {
 # characters that were never split.
 # Usage: tui_cut <text> <n> [mark] -> the cut string
 tui_cut() {
-    local s="$1" n="$2" mark="${3:-$(tui_ellipsis)}" keep
-    [[ "$n" =~ ^-?[0-9]+$ ]] || n=0
-    (( n <= 0 )) && { printf ''; return 0; }
-    (( ${#s} <= n )) && { printf '%s' "$s"; return 0; }
+    local s="$1" n="$2" mark="${3:-$(tui_ellipsis)}" keep _d _tc_out _tc_rest _tc_i
+    _d="$n"; case "$_d" in -*) _d="${_d#-}" ;; esac
+    case "$_d" in ''|*[!0-9]*) n=0 ;; esac
+    [ "$n" -le 0 ] && { printf ''; return 0; }
+    [ "${#s}" -le "$n" ] && { printf '%s' "$s"; return 0; }
 
     keep=$(( n - ${#mark} ))
-    (( keep < 0 )) && keep=0
-    s="${s:0:$keep}"
+    [ "$keep" -lt 0 ] && keep=0
+    # Chopped one character at a time rather than cut to a precision.
+    #
+    # `${s:0:$keep}` counts characters. `printf '%.*s'` counts **bytes**, and
+    # in a UTF-8 locale those differ: `tui_cut "héllo" 3` came out as `h`, a
+    # lone `c3` lead byte, and the ellipsis. Invalid UTF-8, out of the one
+    # function here whose whole purpose is not to emit a split character.
+    #
+    # `${rest#?}` removes one character where the shell counts characters and
+    # one byte where it counts bytes, which is the same unit `${#s}` used two
+    # lines above. So the arithmetic and the cut agree either way, and where
+    # they are bytes the repair walk below is what catches a split.
+    _tc_out=""
+    _tc_rest="$s"
+    _tc_i=0
+    while [ "$_tc_i" -lt "$keep" ] && [ -n "$_tc_rest" ]; do
+        _tc_out="${_tc_out}${_tc_rest%"${_tc_rest#?}"}"
+        _tc_rest="${_tc_rest#?}"
+        _tc_i=$(( _tc_i + 1 ))
+    done
+    s="$_tc_out"
 
     if ! tui_unicode_ok; then
-        local i cont=0 b code want
+        local cont=0 b code want tmp
         # Walk back over trailing continuation bytes, then look at the byte in
         # front of them. The sequence is incomplete only when that lead byte
         # wanted more bytes than are present.
-        for (( i = ${#s}; i > 0; i-- )); do
-            b="${s:i-1:1}"
-            printf -v code '%d' "'$b" 2>/dev/null || code=0
-            (( code < 0 )) && code=$(( code + 256 ))
-            if (( code >= 128 && code <= 191 )); then cont=$(( cont + 1 )); continue; fi
+        #
+        # Chopped from the end rather than indexed backwards, for the same
+        # reason as `tui_vis`: this loop also carries a `continue`, and `tmp`
+        # after the chop is exactly what `${s:0:i-1}` used to name.
+        tmp="$s"
+        while [ -n "$tmp" ]; do
+            b="${tmp#"${tmp%?}"}"
+            tmp="${tmp%?}"
+            code="$(printf '%d' "'$b" 2>/dev/null)" || code=0
+            [ -n "$code" ] || code=0
+            [ "$code" -lt 0 ] && code=$(( code + 256 ))
+            if [ "$code" -ge 128 ] && [ "$code" -le 191 ]; then
+                cont=$(( cont + 1 )); continue
+            fi
             want="$(_tui_lead_len "$code")"
-            if (( want > 0 && want > cont + 1 )); then
-                s="${s:0:i-1}"          # a real partial sequence: drop it whole
+            if [ "$want" -gt 0 ] && [ "$want" -gt $(( cont + 1 )) ]; then
+                s="$tmp"                # a real partial sequence: drop it whole
             fi
             break
         done
