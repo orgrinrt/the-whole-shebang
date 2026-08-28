@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env nutshell
 # =============================================================================
 # the-whole-shebang/test - Run the test suite
 # =============================================================================
@@ -14,19 +14,14 @@
 set -uo pipefail
 HERE="${BASH_SOURCE[0]%/*}"
 
-# shellcheck source=/dev/null
-. "$HERE/lib/find-nutshell"
-nutshell_find "" "${SHEBANG_NUTSHELL_REF:-0.4.1}" || exit 1
-# shellcheck source=/dev/null
-. "$NUTSHELL_INIT" || exit 1
 
 # Resolved once, and everything a test starts inherits it. Without this each
 # subshell resolves the pin again, and the tests set their own XDG directories,
 # so the resolution stamp is somewhere else every time and every one of them
 # asks the remote. A suite that reaches the network is a suite that fails on a
 # train.
-NUTSHELL_HOME="${NUTSHELL_INIT%/init}"
-export NUTSHELL_HOME NUTSHELL_INIT
+NUTSHELL_HOME="${NUTSHELL_ROOT}"
+export NUTSHELL_HOME
 
 use test log
 

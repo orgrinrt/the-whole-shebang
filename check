@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env nutshell
 # =============================================================================
 # the-whole-shebang/check - Run the QA checks
 # =============================================================================
@@ -17,11 +17,9 @@
 set -uo pipefail
 HERE="${BASH_SOURCE[0]%/*}"
 
-# shellcheck source=/dev/null
-. "$HERE/lib/find-nutshell"
-nutshell_find "" "${SHEBANG_NUTSHELL_REF:-0.4.1}" || exit 1
-
-root="${NUTSHELL_INIT%/init}"
+# The launcher already resolved the pin to get here, and exported where it
+# resolved to. Nothing in this repository needs to know how that happened.
+root="${NUTSHELL_ROOT}"
 [[ -x "${root}/check" ]] || {
     printf 'the nutshell at %s has no check in it\n' "$root" >&2
     exit 1

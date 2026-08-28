@@ -137,16 +137,15 @@ and all you get back is a border.
 ./check
 ```
 
-`test` and `check` resolve nutshell themselves through `lib/find-nutshell`,
-pinned at the released `0.4.1` so the suite runs against the same interpreter
-you would get. `SHEBANG_NUTSHELL_REF` names another one, a tag or a branch. There is nothing to initialise first: a copy of
-nutshell in the tree is a second version that drifts from the machine's one in silence,
-so this carries the resolver and not the interpreter.
+`test` and `check` run through the `nutshell` launcher, which reads the pin in
+`nut.toml` and resolves it. That pin is `dev`, so the suite runs against the
+same interpreter this library is developed against, and a branch pin means the
+head of that branch rather than whatever happens to be on the machine.
 
-That resolver is a byte for byte copy of nutshell's own, because a project cannot use the
-resolver to find the resolver. `tests/find_nutshell_copy_test.sh` compares the two and
-fails when they have moved apart. A stale one is otherwise quiet about it, resolving what
-it understood back when it was copied and knowing nothing of a pin shape added since.
+Install nutshell once and both work. Nothing here carries a copy of any part of
+it: the launcher is the one thing that knows how to find a nutshell, and a
+second copy of that knowledge in this tree is a thing that goes quietly out of
+date.
 
 ## Support
 
