@@ -229,14 +229,30 @@ it_refuses_a_width_of_nothing() {
 
 #[test]
 it_does_not_leave_half_a_character_behind() {
-    local body out
-    body="$(printf '\xc3\xa9%.0s' {1..20})"
-    local n
-    for n in 9 10 11 12 13 14 15 16; do
-        out="$(LC_ALL=C LC_CTYPE=C LANG=C tui_cut "$body" "$n" '...')"
-        # Decoded, not grepped: a lone lead byte is what a split leaves, and
-        # the obvious byte-class greps for it match nothing either way.
-        assert_ok python3 -c 'import sys; sys.stdin.buffer.read().decode("utf-8")' <<<"$out"
+    local body out n
+    # Not forced to `C`, and not one character repeated.
+    #
+    # This test could not fail. Under `LC_ALL=C` the shell counts bytes, so the
+    # width arithmetic and the cut use the same unit and cannot disagree, and
+    # the repair walk runs as well because `tui_unicode_ok` is false there. The
+    # body was twenty identical two-byte characters with no ASCII in it, so
+    # even the arithmetic landed on boundaries. Three separate reasons it was
+    # green, and a real split shipped underneath all of them: `tui_cut "héllo"
+    # 3` returned `h`, a lone `c3`, and the ellipsis.
+    #
+    # The locale a person actually runs in is the one that matters, and mixed
+    # widths are what put the boundary somewhere the arithmetic does not.
+    local bodies='héllo aébc 日本語x aa日bb éé日aaé'
+    local body
+    for body in $bodies; do
+        for n in 2 3 4 5 6 7 8; do
+            out="$(tui_cut "$body" "$n" '...')"
+            assert_ok python3 -c 'import sys; sys.stdin.buffer.read().decode("utf-8")' <<<"$out"
+            # And again where the shell counts bytes, which is the case the
+            # repair walk exists for.
+            out="$(LC_ALL=C LC_CTYPE=C LANG=C tui_cut "$body" "$n" '...')"
+            assert_ok python3 -c 'import sys; sys.stdin.buffer.read().decode("utf-8")' <<<"$out"
+        done
     done
 }
 

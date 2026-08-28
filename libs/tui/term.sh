@@ -383,7 +383,7 @@ tui_vis() {
 # characters that were never split.
 # Usage: tui_cut <text> <n> [mark] -> the cut string
 tui_cut() {
-    local s="$1" n="$2" mark="${3:-$(tui_ellipsis)}" keep _d
+    local s="$1" n="$2" mark="${3:-$(tui_ellipsis)}" keep _d _tc_out _tc_rest _tc_i
     _d="$n"; case "$_d" in -*) _d="${_d#-}" ;; esac
     case "$_d" in ''|*[!0-9]*) n=0 ;; esac
     [ "$n" -le 0 ] && { printf ''; return 0; }
@@ -391,9 +391,26 @@ tui_cut() {
 
     keep=$(( n - ${#mark} ))
     [ "$keep" -lt 0 ] && keep=0
-    # `${s:0:$keep}` is a bash substring. POSIX `printf` takes a precision, so
-    # `%.*s` is the same cut with no fork, `printf` being a builtin.
-    s="$(printf '%.*s' "$keep" "$s")"
+    # Chopped one character at a time rather than cut to a precision.
+    #
+    # `${s:0:$keep}` counts characters. `printf '%.*s'` counts **bytes**, and
+    # in a UTF-8 locale those differ: `tui_cut "héllo" 3` came out as `h`, a
+    # lone `c3` lead byte, and the ellipsis. Invalid UTF-8, out of the one
+    # function here whose whole purpose is not to emit a split character.
+    #
+    # `${rest#?}` removes one character where the shell counts characters and
+    # one byte where it counts bytes, which is the same unit `${#s}` used two
+    # lines above. So the arithmetic and the cut agree either way, and where
+    # they are bytes the repair walk below is what catches a split.
+    _tc_out=""
+    _tc_rest="$s"
+    _tc_i=0
+    while [ "$_tc_i" -lt "$keep" ] && [ -n "$_tc_rest" ]; do
+        _tc_out="${_tc_out}${_tc_rest%"${_tc_rest#?}"}"
+        _tc_rest="${_tc_rest#?}"
+        _tc_i=$(( _tc_i + 1 ))
+    done
+    s="$_tc_out"
 
     if ! tui_unicode_ok; then
         local cont=0 b code want tmp
