@@ -11,9 +11,20 @@ and nothing else, and never has to learn that the rest is even here.
 That is the whole idea, so if you find a library in here reaching for another one for no
 good reason, that's a bug and I'd like to hear about it.
 
+## What it needs
+
+nutshell, and a recent one. `libs/tui/report.sh` and `libs/tui/menu/draw.sh`
+both use `list`, which arrived in nutshell 0.7.0, so the entry points here state
+that floor and refuse under it rather than failing later on a missing function.
+
+`nut.toml` pins `nutshell_branch = "dev"` rather than a version, because this
+and nutshell are developed together. That means what this does can change when
+nutshell's dev moves, including after a release here is tagged. It is the right
+trade while the two move together and it will not always be.
+
 ## Status
 
-First release. The api hasn't settled yet and breaking changes should be expected,
+Second release. The api hasn't settled yet and breaking changes should be expected,
 though I'll try to keep them documented. The tui half especially is young: it was
 written for one bootable maintenance tool and the shapes it has are the shapes that tool
 needed, so there are almost certainly gaps that only show up once somebody uses it for
