@@ -101,7 +101,7 @@ show_summary = true
 [package]
 name = "the-whole-shebang"
 version = "0.2.0"
-description = "Standalone shell libraries built on nutshell, each taken on its own."
+description = "Standalone bash libraries built on nutshell, each taken on its own."
 license = "MPL-2.0"
 repository = "https://github.com/orgrinrt/the-whole-shebang"
 keywords = ["bash", "shell", "posix", "tui", "library"]

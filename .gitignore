@@ -1,6 +1,5 @@
 
-# The vendored fallback. `nutshell_find` looks here last, for a machine with no
-# network that is being rescued, so somebody may legitimately drop a nutshell
-# in. It is never committed: a copy in the tree is a second version that drifts
-# from the machine's in silence, which is what `lib/find-nutshell` replaced.
-/lib/nutshell/
+# Nothing vendors. The entry that used to sit here described a fallback a
+# deleted resolver looked for; keeping it would document an invitation to the
+# practice this repository stopped. If a nutshell ends up in the tree by hand,
+# that is a thing to notice in `git status`, not a thing to hide.

@@ -315,5 +315,9 @@ it_still_writes_no_colour_into_a_pipe() {
         . libs/tui/term.sh; . libs/tui/report.sh
         tui_report_reset; tui_report_row fail a b
         tui_report_show T')"
+    # The row has to have rendered, or "no colour" is true of an empty string
+    # and this passes having run nothing. It could: `nutshell -c` needs the
+    # launcher on PATH, where `bash -c` needed nothing at all.
+    assert_ok grep -q 'a' <<<"$out"
     assert_fails grep -q $'\x1b' <<<"$out"
 }

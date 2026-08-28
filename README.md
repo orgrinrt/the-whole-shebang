@@ -46,9 +46,9 @@ doing today, and a tag like `0.1.0` is the one to use if you want the thing to s
 exactly where you left it.
 
 Modules separate with `::` the whole way down, and `lib.nut` is the file that says which
-name maps to where. Vendoring the repository works too and sources a file directly: a
-checkout at `lib/shebang/` is reached as
-`. "${0%/*}/lib/shebang/libs/diagnostics/findings.sh"`.
+name maps to where. There is no vendored path and there should not be one: a copy in your
+tree is a second version of this that goes quietly out of date, and the whole point of the
+manifest is that you say which one you want and the launcher fetches it.
 
 Every library here stops immediately if nutshell has not been initialised, and names the
 setup step, rather than letting you find out later on some undefined function.
