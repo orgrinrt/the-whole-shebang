@@ -294,12 +294,12 @@ it_knows_about_the_terminal_without_being_asked_first() {
 import pty, os, sys
 root = sys.argv[1]
 script = (
-    'cd %s; . "$NUTSHELL_INIT"; . libs/tui/term.sh; . libs/tui/report.sh; '
+    'cd %s; . libs/tui/term.sh; . libs/tui/report.sh; '
     'tui_report_reset; tui_report_row fail a b; '
     'printf "escapes:%%d\\n" "$(tui_report_show T | grep -c $\'\\x1b\')"' % root
 )
 buf = []
-pty.spawn(["bash", "-c", script], lambda fd: (lambda d: (buf.append(d), d)[1])(os.read(fd, 1024)))
+pty.spawn(["nutshell", "-c", script], lambda fd: (lambda d: (buf.append(d), d)[1])(os.read(fd, 1024)))
 print(b"".join(buf).decode(errors="replace"))
 PY
 )"
@@ -311,9 +311,13 @@ PY
 it_still_writes_no_colour_into_a_pipe() {
     # The other direction of the same flag, and the one that matters for a log.
     local out
-    out="$(cd "$TROOT" && bash -c '
-        . "$NUTSHELL_INIT"; . libs/tui/term.sh; . libs/tui/report.sh
+    out="$(cd "$TROOT" && nutshell -c '
+        . libs/tui/term.sh; . libs/tui/report.sh
         tui_report_reset; tui_report_row fail a b
         tui_report_show T')"
+    # The row has to have rendered, or "no colour" is true of an empty string
+    # and this passes having run nothing. It could: `nutshell -c` needs the
+    # launcher on PATH, where `bash -c` needed nothing at all.
+    assert_ok grep -q 'a' <<<"$out"
     assert_fails grep -q $'\x1b' <<<"$out"
 }

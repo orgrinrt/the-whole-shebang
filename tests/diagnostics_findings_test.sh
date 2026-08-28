@@ -156,12 +156,11 @@ it_keeps_the_clean_line_it_had_when_only_two_are_given() {
     # that default itself: asserting it here would have been a test of the
     # fixture, and emptying the library's default killed nothing.
     local said
-    said="$(bash -c '
-        . "$1"/init || exit 1
-        . "$2"
+    said="$(nutshell -c '
+        . "$1"
         findings_explain "blocked" "judge"
         findings_verdict 2>/dev/null || true
-    ' _ "${NUTSHELL_INIT%/init}" "${BASH_SOURCE[0]%/*}/../libs/diagnostics/findings.sh")"
+    ' "${BASH_SOURCE[0]%/*}/../libs/diagnostics/findings.sh")"
 
     assert_ne "${said//[[:space:]]/}" ""
     assert_contains "$said" "clean"

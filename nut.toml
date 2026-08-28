@@ -8,6 +8,15 @@
 # the thing it is built on.
 # =============================================================================
 
+# Which nutshell this project wants. Root level, before any table: a bare key
+# after a table header belongs to that table and is a pin nothing reads.
+#
+# `dev` rather than a version, because this library and nutshell are developed
+# together and a released tag would freeze it behind whatever landed today. A
+# branch pin is an identity rather than a floor: it means the head of dev, and
+# the launcher resolves it against the remote and keeps it fresh.
+nutshell_branch = "dev"
+
 [meta]
 # The schema's version, not this project's. `nutshell`'s
 # `examples/configs/empty.nut.toml` says so where the field is documented, and
@@ -19,7 +28,7 @@ description = "Standalone bash libraries built on nutshell, each taken on its ow
 
 [paths]
 lib_dir = "libs"
-exclude = [".git", "lib/find-nutshell", "node_modules", "vendor", "target", "dist", "build"]
+exclude = [".git", "node_modules", "vendor", "target", "dist", "build"]
 include = ["*.sh", "test"]
 
 [annotations]
@@ -85,3 +94,14 @@ color = "auto"
 verbosity = "normal"
 show_passing = false
 show_summary = true
+
+# What this package is, for anything that resolves it by name. The version is
+# the package's own, distinct from `[meta] version`, which names the schema the
+# manifest is written against.
+[package]
+name = "the-whole-shebang"
+version = "0.2.0"
+description = "Standalone bash libraries built on nutshell, each taken on its own."
+license = "MPL-2.0"
+repository = "https://github.com/orgrinrt/the-whole-shebang"
+keywords = ["bash", "shell", "posix", "tui", "library"]

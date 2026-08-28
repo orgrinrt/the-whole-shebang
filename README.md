@@ -46,9 +46,9 @@ doing today, and a tag like `0.1.0` is the one to use if you want the thing to s
 exactly where you left it.
 
 Modules separate with `::` the whole way down, and `lib.nut` is the file that says which
-name maps to where. Vendoring the repository works too and sources a file directly: a
-checkout at `lib/shebang/` is reached as
-`. "${0%/*}/lib/shebang/libs/diagnostics/findings.sh"`.
+name maps to where. There is no vendored path and there should not be one: a copy in your
+tree is a second version of this that goes quietly out of date, and the whole point of the
+manifest is that you say which one you want and the launcher fetches it.
 
 Every library here stops immediately if nutshell has not been initialised, and names the
 setup step, rather than letting you find out later on some undefined function.
@@ -137,16 +137,15 @@ and all you get back is a border.
 ./check
 ```
 
-`test` and `check` resolve nutshell themselves through `lib/find-nutshell`,
-pinned at the released `0.4.1` so the suite runs against the same interpreter
-you would get. `SHEBANG_NUTSHELL_REF` names another one, a tag or a branch. There is nothing to initialise first: a copy of
-nutshell in the tree is a second version that drifts from the machine's one in silence,
-so this carries the resolver and not the interpreter.
+`test` and `check` run through the `nutshell` launcher, which reads the pin in
+`nut.toml` and resolves it. That pin is `dev`, so the suite runs against the
+same interpreter this library is developed against, and a branch pin means the
+head of that branch rather than whatever happens to be on the machine.
 
-That resolver is a byte for byte copy of nutshell's own, because a project cannot use the
-resolver to find the resolver. `tests/find_nutshell_copy_test.sh` compares the two and
-fails when they have moved apart. A stale one is otherwise quiet about it, resolving what
-it understood back when it was copied and knowing nothing of a pin shape added since.
+Install nutshell once and both work. Nothing here carries a copy of any part of
+it: the launcher is the one thing that knows how to find a nutshell, and a
+second copy of that knowledge in this tree is a thing that goes quietly out of
+date.
 
 ## Support
 

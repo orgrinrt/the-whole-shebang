@@ -469,9 +469,9 @@ it_shows_no_panel_when_there_is_nothing_to_lay_one_out_with() {
     # menu works without layout loaded. Without it there is no way to know
     # whether a panel would fit, and guessing is how the list gets squeezed.
     local out
-    out="$(bash -c '
+    out="$(nutshell -c '
         cd '"$PWD"'
-        . "$NUTSHELL_INIT"; . libs/tui/term.sh; . libs/tui/menu.sh
+        . libs/tui/term.sh; . libs/tui/menu.sh
         tui_menu_reset; tui_menu_aside a b
         TUI_COLS=200; _tui_menu_aside_width')"
     assert_eq "$out" "0"

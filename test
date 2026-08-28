@@ -1,9 +1,10 @@
-#!/usr/bin/env bash
+#!/usr/bin/env nutshell
 # =============================================================================
 # the-whole-shebang/test - Run the test suite
 # =============================================================================
-# Every `#[test]` function under tests/. An entry point, so it resolves
-# nutshell itself before there is a nutshell to ask.
+# Every `#[test]` function under tests/. An entry point. The launcher resolves
+# the pin in `nut.toml` before this runs; what is left here is checking that
+# what it resolved is new enough.
 #
 # Usage:
 #   ./test                          everything
@@ -14,19 +15,31 @@
 set -uo pipefail
 HERE="${BASH_SOURCE[0]%/*}"
 
-# shellcheck source=/dev/null
-. "$HERE/lib/find-nutshell"
-nutshell_find "" "${SHEBANG_NUTSHELL_REF:-0.4.1}" || exit 1
-# shellcheck source=/dev/null
-. "$NUTSHELL_INIT" || exit 1
 
-# Resolved once, and everything a test starts inherits it. Without this each
-# subshell resolves the pin again, and the tests set their own XDG directories,
-# so the resolution stamp is somewhere else every time and every one of them
-# asks the remote. A suite that reaches the network is a suite that fails on a
-# train.
-NUTSHELL_HOME="${NUTSHELL_INIT%/init}"
-export NUTSHELL_HOME NUTSHELL_INIT
+# The pin fails open. `_nut_resolve_pin` returning nothing is not fatal unless
+# `NUTSHELL_PIN_STRICT` is set, so an unreachable ref leaves the ambient
+# nutshell in place and this runs against whatever the machine happens to have.
+# When that one is older the failures land on this repository's own tests and
+# read as a defect here; when it is newer they do not land at all.
+#
+# `lib/find-nutshell` skipped a candidate that did not satisfy the minimum, and
+# its own comment called that "the whole of it". Deleting the file took the
+# capability with it, so the floor is stated here instead. Inline in both entry
+# points on purpose: each has to be able to say this before trusting anything
+# it would otherwise source.
+: "${NUTSHELL_ROOT:?run this through the nutshell launcher, or install nutshell}"
+_min="0.7.0"
+if [[ "$(printf '%s\n%s\n' "$_min" "${NUTSHELL_VERSION:-0.0.0}" | sort -V | head -1)" != "$_min" ]]; then
+    printf 'this needs nutshell %s or newer, and resolved %s at %s\n' \
+        "$_min" "${NUTSHELL_VERSION:-unknown}" "$NUTSHELL_ROOT" >&2
+    printf 'the pin is `nutshell_branch` at the root of nut.toml, above the first table.\n' >&2
+    exit 1
+fi
+
+# What carries the pin into a subshell is PATH: the launcher prepends the
+# pinned `bin`, and `nutshell -c` never resolves a pin of its own, because
+# its guard tests for a readable file and `-c` is not one. This used to
+# export `NUTSHELL_HOME` and call that the mechanism. Nothing reads it.
 
 use test log
 
