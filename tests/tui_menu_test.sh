@@ -1226,3 +1226,129 @@ it_installs_the_bindings_itself_when_a_caller_did_not() {
     tui_menu_keys >/dev/null
     assert_eq "$(tui_action_for main 'q')" "menu-back"
 }
+
+# --- typing into the search --------------------------------------------------
+
+# The helper reads and writes the run loop's own variables, so a test has to
+# stand in for that loop. These are what it sees.
+typing_setup() {
+    fixture
+    tui_menu_bindings
+    filtering=1; TUI_MENU_FILTER=""; cursor=1; top=0; act=""
+}
+
+#[test]
+it_adds_a_printable_key_to_the_phrase() {
+    local filtering cursor top act
+    typing_setup
+    TUI_KEY="d"; assert_fails _tui_menu_typing
+    TUI_KEY="e"; assert_fails _tui_menu_typing
+    assert_eq "$TUI_MENU_FILTER" "de"
+    assert_eq "$filtering" "1"
+}
+
+#[test]
+it_types_the_letters_that_are_keys_outside_the_search() {
+    # `q`, `a`, `g`, `s` and `f` all mean something in the list. Inside the
+    # search they are letters, or `chroot` would quit at the h.
+    local filtering cursor top act
+    typing_setup
+    local k
+    for k in q a g s f k j; do TUI_KEY="$k"; _tui_menu_typing || true; done
+    assert_eq "$TUI_MENU_FILTER" "qagsfkj"
+    assert_eq "$filtering" "1"
+}
+
+#[test]
+it_types_a_space_rather_than_choosing() {
+    # Space chooses in the list. A phrase with two words in it would be
+    # unreachable if it did so here too.
+    local filtering cursor top act
+    typing_setup
+    TUI_KEY="a"; _tui_menu_typing || true
+    TUI_KEY="space"; _tui_menu_typing || true
+    TUI_KEY="b"; _tui_menu_typing || true
+    assert_eq "$TUI_MENU_FILTER" "a b"
+}
+
+#[test]
+it_rubs_out_a_letter() {
+    local filtering cursor top act
+    typing_setup
+    TUI_MENU_FILTER="disk"
+    TUI_KEY="backspace"; assert_fails _tui_menu_typing
+    assert_eq "$TUI_MENU_FILTER" "dis"
+    assert_eq "$filtering" "1"
+}
+
+#[test]
+it_leaves_the_search_by_rubbing_past_the_start() {
+    # The way out is the way you came in.
+    local filtering cursor top act
+    typing_setup
+    TUI_MENU_FILTER=""
+    TUI_KEY="backspace"; assert_fails _tui_menu_typing
+    assert_eq "$filtering" "0"
+}
+
+#[test]
+it_drops_the_phrase_on_the_way_out() {
+    # Leaving with a phrase still applied hides rows from the next visit.
+    local filtering cursor top act
+    typing_setup
+    TUI_MENU_FILTER="disk"
+    TUI_KEY="esc"; assert_fails _tui_menu_typing
+    assert_eq "$filtering" "0"
+    assert_empty "$TUI_MENU_FILTER"
+}
+
+#[test]
+it_hands_back_the_keys_that_leave_or_choose() {
+    # These two belong to the dispatch rather than to the search, because one
+    # of them returns from the run and a helper cannot.
+    local filtering cursor top act
+    typing_setup
+    TUI_KEY="enter";  assert_ok _tui_menu_typing; assert_eq "$act" "search-accept"
+    TUI_KEY="ctrl-c"; assert_ok _tui_menu_typing; assert_eq "$act" "search-quit"
+}
+
+#[test]
+it_still_moves_the_cursor_while_the_search_is_open() {
+    # So a phrase can be typed and a row picked without leaving it.
+    local filtering cursor top act
+    typing_setup
+    TUI_KEY="down"; assert_ok _tui_menu_typing; assert_eq "$act" "menu-down"
+    TUI_KEY="pgup"; assert_ok _tui_menu_typing; assert_eq "$act" "menu-page-up"
+    assert_eq "$filtering" "1"
+    assert_empty "$TUI_MENU_FILTER"
+}
+
+#[test]
+it_ignores_a_key_it_has_no_use_for() {
+    local filtering cursor top act
+    typing_setup
+    TUI_KEY="insert"; assert_fails _tui_menu_typing
+    TUI_KEY="delete"; assert_fails _tui_menu_typing
+    TUI_KEY="unknown"; assert_fails _tui_menu_typing
+    assert_empty "$TUI_MENU_FILTER"
+    assert_eq "$filtering" "1"
+}
+
+#[test]
+it_narrows_the_list_as_the_phrase_grows() {
+    # The whole reason typing does anything: the view is rebuilt on every
+    # letter rather than when the search is closed.
+    local filtering cursor top act
+    typing_setup
+    TUI_MENU_TEXT=(Disk Delve Depth Gamma Boot Delta Epsilon)
+    tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "7"
+    TUI_KEY="d"; _tui_menu_typing || true
+    # Delve, Depth and Delta, plus the two headings they sit under.
+    assert_eq "${#TUI_MENU_VIEW[@]}" "5"
+    TUI_KEY="e"; _tui_menu_typing || true
+    TUI_KEY="l"; _tui_menu_typing || true
+    assert_eq "$TUI_MENU_FILTER" "del"
+    # Delve and Delta now, and Depth has gone.
+    assert_eq "${#TUI_MENU_VIEW[@]}" "4"
+}

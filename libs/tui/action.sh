@@ -429,3 +429,53 @@ tui_action_run() {
         return 1; }
     "$fn" "$@"
 }
+
+# -----------------------------------------------------------------------------
+# A keymap on disk
+# -----------------------------------------------------------------------------
+
+#[pub]
+# Point actions at different keys, from a `[keys]` section in a toml file.
+#
+#   [keys]
+#   section-next = "ctrl-down"
+#   section-prev = "ctrl-up"
+#   menu-back    = "q esc"
+#
+# An id on the left, the keys on the right, space separated, and an empty value
+# unbinds the action without removing it, so it stays reachable by name.
+#
+# **An id nobody registered is reported and skipped rather than ignored.** A
+# keymap is written by hand, so a typo is the ordinary case, and the failure it
+# would otherwise produce is a key that quietly keeps doing what it did before
+# with nothing anywhere saying why. The rest of the file still applies: one bad
+# line should not cost somebody every binding they wrote.
+#
+# Returns non-zero when any line was refused, so a caller can say so once.
+# Usage: tui_action_keymap <file>
+tui_action_keymap() {
+    local file="${1:-}" line id keys rc=0
+    [[ -r "$file" ]] || {
+        printf 'tui_action_keymap: cannot read %s\n' "${file:-empty}" >&2; return 1; }
+    declare -F toml_section_pairs >/dev/null 2>&1 || use toml
+    while IFS= read -r line; do
+        id="${line%%=*}"; keys="${line#*=}"
+        [[ -n "$id" ]] || continue
+        if ! _tui_action_index "$id" >/dev/null; then
+            printf 'tui_action_keymap: %s: no action called %s\n' "$file" "$id" >&2
+            rc=1; continue
+        fi
+        tui_action_bind "$id" "$keys"
+    done < <(toml_section_pairs "$file" keys)
+    # After a rebind, a collision is the thing somebody wants told about: the
+    # first action wins, the second key does nothing, and a keymap that half
+    # works is worse to debug than one that does not.
+    local clash
+    while IFS= read -r clash; do
+        [[ -n "$clash" ]] || continue
+        printf 'tui_action_keymap: %s: two actions answer to one key: %s\n' \
+            "$file" "$clash" >&2
+        rc=1
+    done < <(tui_action_conflicts)
+    return $rc
+}

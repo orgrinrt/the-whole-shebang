@@ -438,3 +438,97 @@ it_reaches_an_action_bound_to_a_control_byte() {
     assert_eq "$(tui_action_for main 'ctrl-p')" "up"
     assert_fails tui_action_for main $'\016'
 }
+
+# --- a keymap on disk --------------------------------------------------------
+
+keymap_file() {
+    local f; f="$(mktemp)"
+    printf '%s\n' "$@" > "$f"
+    printf '%s' "$f"
+}
+
+#[test]
+it_rebinds_from_a_file() {
+    fixture
+    local f; f="$(keymap_file '[keys]' 'section-prev = "ctrl-up"' 'section-next = "ctrl-down"')"
+    assert_ok tui_action_keymap "$f"
+    assert_eq "$(tui_action_keys section-prev)" "ctrl-up"
+    assert_eq "$(tui_action_for main 'ctrl-down')" "section-next"
+    # And the keys it replaced are gone, which is the whole point of a rebind.
+    assert_fails tui_action_for main '['
+    assert_fails tui_action_for main ']'
+    rm -f "$f"
+}
+
+#[test]
+it_takes_several_keys_for_one_action() {
+    fixture
+    local f; f="$(keymap_file '[keys]' 'quit = "q esc ctrl-c"')"
+    assert_ok tui_action_keymap "$f"
+    assert_eq "$(tui_action_for main 'esc')" "quit"
+    assert_eq "$(tui_action_for main 'ctrl-c')" "quit"
+    rm -f "$f"
+}
+
+#[test]
+it_unbinds_on_an_empty_value() {
+    fixture
+    local f; f="$(keymap_file '[keys]' 'help = ""')"
+    assert_ok tui_action_keymap "$f"
+    assert_eq "$(tui_action_keys help)" ""
+    assert_fails tui_action_for main '?'
+    # Reachable by name still, which is what unbound means as against gone.
+    assert_eq "$(tui_action_search help | head -1)" "help"
+    rm -f "$f"
+}
+
+#[test]
+it_reports_an_id_nobody_registered_and_keeps_going() {
+    # A keymap is written by hand, so a typo is the ordinary case. Ignoring it
+    # leaves a key doing what it did before with nothing saying why, and
+    # refusing the file costs somebody every other line they wrote.
+    fixture
+    local f; f="$(keymap_file '[keys]' 'sectin-next = "ctrl-down"' 'search = "ctrl-f"')"
+    assert_fails tui_action_keymap "$f" 2>/dev/null
+    assert_eq "$(tui_action_for main 'ctrl-f')" "search"
+    assert_eq "$(tui_action_keys section-next)" "bracket-right ctrl-down"
+    rm -f "$f"
+}
+
+#[test]
+it_says_which_id_it_did_not_recognise() {
+    fixture
+    local f; f="$(keymap_file '[keys]' 'sectin-next = "ctrl-down"')"
+    local msg; msg="$(tui_action_keymap "$f" 2>&1 >/dev/null)"
+    assert_ok grep -q 'sectin-next' <<< "$msg"
+    rm -f "$f"
+}
+
+#[test]
+it_reports_a_keymap_that_puts_two_actions_on_one_key() {
+    # The first wins and the second key does nothing. A keymap that half works
+    # is worse to debug than one that does not work at all.
+    fixture
+    local f; f="$(keymap_file '[keys]' 'search = "q"')"   # q is already quit's
+    local msg; msg="$(tui_action_keymap "$f" 2>&1 >/dev/null)"
+    assert_ok grep -q 'two actions answer to one key' <<< "$msg"
+    rm -f "$f"
+}
+
+#[test]
+it_refuses_a_file_it_cannot_read() {
+    fixture
+    assert_fails tui_action_keymap /no/such/keymap.toml 2>/dev/null
+    assert_fails tui_action_keymap '' 2>/dev/null
+    # And nothing moved.
+    assert_eq "$(tui_action_keys section-prev)" "bracket-left ctrl-up"
+}
+
+#[test]
+it_ignores_a_file_with_no_keys_section() {
+    fixture
+    local f; f="$(keymap_file '[other]' 'section-prev = "ctrl-up"')"
+    assert_ok tui_action_keymap "$f"
+    assert_eq "$(tui_action_keys section-prev)" "bracket-left ctrl-up"
+    rm -f "$f"
+}
