@@ -48,6 +48,14 @@ declare -ga TUI_ACTION_LABEL=()
 declare -ga TUI_ACTION_KEYS=()      # names, space separated, possibly empty
 declare -ga TUI_ACTION_HANDLER=()
 
+# Bumped whenever anything about the register changes. Anything derived from it
+# and worth caching, a key line most of all, keeps the number it was built at
+# and rebuilds when the two differ. Without it a surface built once stays built:
+# a keymap read after the defaults were registered leaves the bottom line naming
+# keys that no longer do anything, and the bottom line is the one thing nobody
+# re-reads, so it stays wrong quietly.
+declare -gi TUI_ACTION_GEN=0
+
 # The scopes, and what each one means.
 #
 # `main` is the ordinary interface, and is what `?` lists. `filter` is the
@@ -160,6 +168,7 @@ tui_action_key_char() {
 tui_action_reset() {
     TUI_ACTION_ID=(); TUI_ACTION_SCOPE=(); TUI_ACTION_LABEL=()
     TUI_ACTION_KEYS=(); TUI_ACTION_HANDLER=()
+    TUI_ACTION_GEN=$(( TUI_ACTION_GEN + 1 ))
 }
 
 # Where an id sits, or nothing and a non-zero status.
@@ -190,11 +199,13 @@ tui_action_add() {
     if i="$(_tui_action_index "$id")"; then
         TUI_ACTION_SCOPE[$i]="$scope"; TUI_ACTION_LABEL[$i]="$label"
         TUI_ACTION_KEYS[$i]="$keys";   TUI_ACTION_HANDLER[$i]="$handler"
+        TUI_ACTION_GEN=$(( TUI_ACTION_GEN + 1 ))
         return 0
     fi
     TUI_ACTION_ID+=("$id");     TUI_ACTION_SCOPE+=("$scope")
     TUI_ACTION_LABEL+=("$label"); TUI_ACTION_KEYS+=("$keys")
     TUI_ACTION_HANDLER+=("$handler")
+    TUI_ACTION_GEN=$(( TUI_ACTION_GEN + 1 ))
 }
 
 #[pub]
@@ -208,6 +219,7 @@ tui_action_bind() {
     i="$(_tui_action_index "$id")" || {
         printf 'tui_action_bind: no action called %s\n' "${id:-empty}" >&2; return 1; }
     TUI_ACTION_KEYS[$i]="${2:-}"
+    TUI_ACTION_GEN=$(( TUI_ACTION_GEN + 1 ))
 }
 
 #[pub]

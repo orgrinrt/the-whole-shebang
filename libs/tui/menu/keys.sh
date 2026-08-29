@@ -66,8 +66,14 @@ tui_menu_bindings() {
 # Built once per binding rather than per frame: a command substitution per key
 # is six forks, and the frame it would sit in is the one being made cheap.
 declare -g _TUI_MENU_HINT=""
+declare -gi _TUI_MENU_HINT_GEN=-1
 
 _tui_menu_hint() {
+    # Once per binding, not once ever. Built once was the bug the line exists to
+    # not have: a keymap read after the menu registered its own keys left the
+    # bottom line naming the old ones, and a hint that lies is worse than none,
+    # because somebody presses what it says and nothing happens.
+    (( _TUI_MENU_HINT_GEN == TUI_ACTION_GEN )) && return 0
     local up down sect ch fwd search help back
     up="$(_tui_menu_first_key menu-up)"
     down="$(_tui_menu_first_key menu-down)"
@@ -79,6 +85,7 @@ _tui_menu_hint() {
     ch="$(_tui_menu_first_key menu-choose)"
     _TUI_MENU_HINT="${up}/${down} move   ${sect} ${fwd} section   ${ch} choose"
     _TUI_MENU_HINT+="   ${search} search   ${help} keys   ${back} back"
+    _TUI_MENU_HINT_GEN=$TUI_ACTION_GEN
 }
 
 # The first key an action answers to, as the character to press, or nothing
@@ -87,6 +94,43 @@ _tui_menu_first_key() {
     local keys; keys="$(tui_action_keys "$1")" || return 0
     [[ -n "$keys" ]] || return 0
     tui_action_key_char "${keys%% *}"
+}
+
+# A modifier nobody named is still that arrow, so any modified up moves by
+# section and so does any modified down.
+#
+# The reader hands `shift-up`, `ctrl-alt-up` and the other six through on
+# purpose, and an exact lookup answers for the two that happen to be registered
+# and misses the rest. That matters more than it sounds: the key left standing
+# for somebody whose terminal swallows ctrl-up is `[`, which on a Finnish layout
+# is AltGr+8 and a bare console does not deliver at all.
+#
+# Read off the register rather than listed here, so whichever action holds a
+# modified arrow is the one the others reach, and a rebind moves all of them at
+# once instead of leaving a second list somebody has to keep in step.
+_tui_menu_modified_arrow() {
+    local dir id keys k
+    case "$1" in
+        *-up)   dir=up ;;
+        *-down) dir=down ;;
+        *)      return 1 ;;
+    esac
+    while IFS= read -r id; do
+        [[ -n "$id" ]] || continue
+        keys="$(tui_action_keys "$id")" || continue
+        for k in $keys; do
+            [[ "$k" == *-"$dir" ]] && { printf '%s' "$id"; return 0; }
+        done
+    done < <(tui_action_ids main)
+    return 1
+}
+
+# What a key means in the main scope. One place, because the dispatch, the run
+# it coalesces, and the search all have to agree about it, and three lookups
+# spelled three times is how they stopped agreeing.
+_tui_menu_act_main() {
+    tui_action_for main "$1" && return 0
+    _tui_menu_modified_arrow "$1"
 }
 
 # Which motion an action id means, or nothing when the id does not move the
@@ -137,15 +181,23 @@ _tui_menu_typing() {
         *)
             case "$TUI_KEY" in
                 space) TUI_MENU_FILTER+=" " ;;
-                up|down|left|right|pgup|pgdn|home|end)
-                    # The cursor keys still move while the search is open, so a
-                    # phrase can be typed and a row picked without leaving it.
-                    act="$(tui_action_for main "$TUI_KEY")" || act=""
-                    return 0 ;;
                 *)
                     if [[ ${#TUI_KEY} -eq 1 && "$TUI_KEY" == [[:print:]] ]]; then
                         TUI_MENU_FILTER+="$TUI_KEY"
                     else
+                        # Anything that cannot be part of a phrase may still be
+                        # movement, so a phrase can be typed and a row picked
+                        # without leaving the search.
+                        #
+                        # Asked of the register rather than matched against a
+                        # list of arrow names, or a rebound `menu-up` moves
+                        # everywhere except in the one place somebody is staring
+                        # at a list and wanting to go down it.
+                        local moves
+                        moves="$(_tui_menu_act_main "$TUI_KEY")" || moves=""
+                        if [[ -n "$moves" ]] && _tui_menu_motion_of "$moves" >/dev/null; then
+                            act="$moves"; return 0
+                        fi
                         return 1
                     fi ;;
             esac ;;

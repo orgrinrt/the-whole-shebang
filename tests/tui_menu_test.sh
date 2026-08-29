@@ -1548,3 +1548,212 @@ it_ignores_a_callback_naming_a_function_nobody_defined() {
     assert_fails tui_menu_run "t" < /dev/null > /dev/null 2>&1
     TUI_MENU_IDLE=""
 }
+
+# --- a modifier nobody named -------------------------------------------------
+
+#[test]
+it_moves_by_section_on_any_modified_up_or_down() {
+    # The reader hands eight modified arrows through on purpose and only two of
+    # them are registered, so an exact lookup answers for ctrl and alt and does
+    # nothing at all for the rest. Not a corner: the key left standing for
+    # somebody whose terminal swallows ctrl-up is `[`, which on a Finnish
+    # layout is AltGr+8 and a bare console does not deliver.
+    tui_menu_bindings
+    local k
+    for k in shift-up ctrl-shift-up ctrl-alt-up alt-shift-up ctrl-alt-shift-up; do
+        assert_eq "$(_tui_menu_act_main "$k")" "section-prev"
+    done
+    for k in shift-down ctrl-shift-down ctrl-alt-down alt-shift-down ctrl-alt-shift-down; do
+        assert_eq "$(_tui_menu_act_main "$k")" "section-next"
+    done
+}
+
+#[test]
+it_still_answers_the_two_modified_arrows_that_are_registered() {
+    tui_menu_bindings
+    assert_eq "$(_tui_menu_act_main ctrl-up)"   "section-prev"
+    assert_eq "$(_tui_menu_act_main alt-up)"    "section-prev"
+    assert_eq "$(_tui_menu_act_main ctrl-down)" "section-next"
+    assert_eq "$(_tui_menu_act_main alt-down)"  "section-next"
+}
+
+#[test]
+a_plain_arrow_is_not_a_section_move() {
+    # The control. A fallback that caught `up` as well would take the ordinary
+    # movement key with it, and the list would jump a whole section per press.
+    tui_menu_bindings
+    assert_eq "$(_tui_menu_act_main up)"   "menu-up"
+    assert_eq "$(_tui_menu_act_main down)" "menu-down"
+    assert_fails _tui_menu_modified_arrow up
+    assert_fails _tui_menu_modified_arrow down
+}
+
+#[test]
+a_modified_key_that_is_not_an_arrow_reaches_nothing() {
+    tui_menu_bindings
+    assert_fails _tui_menu_act_main ctrl-shift-f7
+    assert_fails _tui_menu_act_main shift-home
+    assert_fails _tui_menu_act_main ctrl-alt-delete
+}
+
+#[test]
+the_wildcard_follows_a_rebind_rather_than_naming_a_section_outright() {
+    # Read off the register, so whichever action holds a modified arrow is the
+    # one the unnamed modifiers reach. A second list here would have gone stale
+    # the first time somebody wrote a keymap.
+    tui_menu_bindings
+    assert_eq "$(_tui_menu_act_main shift-up)" "section-prev"
+    tui_action_bind section-prev "bracket-left"
+    tui_action_bind menu-up "up k ctrl-up"
+    assert_eq "$(_tui_menu_act_main shift-up)" "menu-up"
+}
+
+#[test]
+a_modified_arrow_reaches_nothing_when_no_action_holds_one() {
+    tui_menu_bindings
+    tui_action_bind section-prev "bracket-left"
+    tui_action_bind section-next "bracket-right"
+    assert_fails _tui_menu_act_main shift-up
+    assert_fails _tui_menu_act_main ctrl-up
+    assert_fails _tui_menu_act_main ctrl-down
+}
+
+# --- moving while the search is open ------------------------------------------
+
+#[test]
+a_modified_arrow_moves_while_the_search_is_open() {
+    local filtering cursor top act
+    typing_setup
+    TUI_KEY="shift-up"; assert_ok _tui_menu_typing
+    assert_eq "$act" "section-prev"
+    assert_empty "$TUI_MENU_FILTER"
+}
+
+#[test]
+a_rebound_movement_key_moves_inside_the_search_too() {
+    # The list this replaced named the arrows outright, so a rebind moved the
+    # cursor everywhere except in the one place somebody is staring at a list
+    # and wanting to go down it.
+    local filtering cursor top act
+    typing_setup
+    tui_action_bind menu-down "down f5"
+    TUI_KEY="f5"; assert_ok _tui_menu_typing
+    assert_eq "$act" "menu-down"
+    assert_empty "$TUI_MENU_FILTER"
+}
+
+#[test]
+a_letter_still_types_even_though_it_moves_outside_the_search() {
+    # The control for the two above, and the reason the register is asked only
+    # after the printable check: `j` and `k` move the cursor outside, and a
+    # phrase with a k in it must not jump the list.
+    local filtering cursor top act
+    typing_setup
+    TUI_KEY="j"; assert_fails _tui_menu_typing
+    TUI_KEY="k"; assert_fails _tui_menu_typing
+    assert_eq "$TUI_MENU_FILTER" "jk"
+}
+
+#[test]
+a_key_that_is_neither_printable_nor_movement_does_nothing_in_the_search() {
+    local filtering cursor top act
+    typing_setup
+    TUI_KEY="f9"; assert_fails _tui_menu_typing
+    assert_empty "$TUI_MENU_FILTER"
+    assert_eq "$filtering" "1"
+}
+
+# --- the bottom line ----------------------------------------------------------
+
+#[test]
+the_bottom_line_follows_a_rebind() {
+    # Built once was the defect the line exists to not have: a keymap read
+    # after the defaults were registered left it naming keys that no longer did
+    # anything, and nobody re-reads a hint they have already read.
+    tui_menu_bindings
+    assert_ok grep -q '\[' <<< "$_TUI_MENU_HINT"
+    tui_action_bind section-prev "f3"
+    _tui_menu_hint
+    assert_ok    grep -q 'f3' <<< "$_TUI_MENU_HINT"
+    assert_fails grep -q '\[' <<< "$_TUI_MENU_HINT"
+}
+
+#[test]
+it_does_not_rebuild_the_bottom_line_when_the_register_has_not_moved() {
+    # Otherwise it is rebuilt per frame, and every key on it is a command
+    # substitution, so that is eight forks a frame in the loop being made
+    # cheap.
+    tui_menu_bindings
+    _TUI_MENU_HINT="marked"
+    _tui_menu_hint
+    assert_eq "$_TUI_MENU_HINT" "marked"
+}
+
+# --- an action the caller owns ------------------------------------------------
+
+declare -gi _handler_ran=0
+_a_handler() { _handler_ran=$(( _handler_ran + 1 )); }
+
+#[test]
+it_runs_a_callers_own_action_from_its_key() {
+    fixture
+    _handler_ran=0
+    tui_action_add mine main "a thing this caller does" "x" _a_handler
+    tui_menu_run "t" < <(printf 'xq') > /dev/null 2>&1
+    assert_eq "$_handler_ran" "1"
+}
+
+#[test]
+it_runs_a_callers_own_action_picked_off_the_palette() {
+    # The palette hands back an id and runs nothing, on purpose. Nothing was
+    # wired to the other end of that, so a caller's action listed by name and
+    # chosen did nothing whatever, silently, which is worse than not listing it.
+    fixture
+    _handler_ran=0
+    tui_action_add mine main "a thing this caller does" "" _a_handler
+    tui_palette_run() { TUI_PALETTE_CHOICE=mine; return 0; }
+    tui_menu_run "t" < <(printf 'pq') > /dev/null 2>&1
+    unset -f tui_palette_run
+    assert_eq "$_handler_ran" "1"
+}
+
+#[test]
+an_action_with_no_handler_falls_through_rather_than_being_swallowed() {
+    # The control, and the reason the default arm ends without a `continue`:
+    # every movement id arrives at it too, and swallowing those would stop the
+    # cursor moving at all.
+    fixture
+    TUI_MENU_CHOICE=""
+    tui_action_add mine main "the caller dispatches this itself" "x"
+    tui_menu_run "t" < <(printf 'x\r') > /dev/null 2>&1
+    assert_eq "$TUI_MENU_CHOICE" "a"
+}
+
+#[test]
+a_handler_naming_a_function_nobody_defined_does_not_stop_the_menu() {
+    fixture
+    TUI_MENU_CHOICE=""
+    tui_action_add mine main "points at nothing" "x" _no_such_handler
+    tui_menu_run "t" < <(printf 'x\r') > /dev/null 2>&1
+    assert_eq "$TUI_MENU_CHOICE" "a"
+}
+
+# --- leaving the search -------------------------------------------------------
+
+#[test]
+ctrl_c_in_the_search_clears_the_phrase_before_it_leaves() {
+    # It used to leave outright, so the phrase survived into the next visit and
+    # hid rows for a reason nobody could see. And because it was its own arm,
+    # the palette could reach the one that skipped the clearing.
+    fixture
+    TUI_MENU_CHOICE=""
+    tui_menu_run "t" < <(printf '/ab\003\r') > /dev/null 2>&1
+    assert_empty "$TUI_MENU_FILTER"
+    assert_eq "$TUI_MENU_CHOICE" "a"
+}
+
+#[test]
+ctrl_c_with_nothing_typed_leaves_the_menu() {
+    fixture
+    assert_fails tui_menu_run "t" < <(printf '/\003') > /dev/null 2>&1
+}

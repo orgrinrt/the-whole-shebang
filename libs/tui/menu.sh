@@ -288,7 +288,7 @@ tui_menu_run() {
                 # One lookup, and everything below dispatches on what the key
                 # means rather than on which key it was. A key nobody bound
                 # falls through and does nothing, which is what it should do.
-                act="$(tui_action_for main "$TUI_KEY")" || act=""
+                act="$(_tui_menu_act_main "$TUI_KEY")" || act=""
             else
                 _tui_menu_typing || continue
             fi
@@ -350,15 +350,38 @@ tui_menu_run() {
                     raw="${TUI_MENU_VIEW[$cursor]:-$cursor}"
                     TUI_MENU_CHOICE="${TUI_MENU_ID[$raw]}"
                     tui_raw_off; return 0 ;;
-                search-quit) tui_raw_off; return 1 ;;
-                menu-back)
+                search-quit|menu-back)
                     # Leaving with a filter still applied would hide rows from
                     # the next visit, so clear it on the way out.
+                    #
+                    # Two ids on one arm because ctrl-c inside the search and q
+                    # outside it are the same act, and while they were separate
+                    # the palette could reach the one that skipped this and
+                    # leave the phrase behind.
                     if [[ -n "$TUI_MENU_FILTER" ]]; then
+                        filtering=0
                         TUI_MENU_FILTER=""; tui_menu_refilter
                         cursor="$(_tui_menu_first)"; top=0; continue
                     fi
                     tui_raw_off; return 1 ;;
+                *)
+                    # An id the menu does not own, from the palette or from a
+                    # key a caller bound. The register is where that caller said
+                    # what runs it, and without this the palette would list a
+                    # caller's own actions and quietly do nothing with them,
+                    # which is the failure the palette exists to not have.
+                    #
+                    # Falls through when there is no handler, since the movement
+                    # ids arrive here too and are worked out below.
+                    local handler=""
+                    handler="$(tui_action_handler "$act")" || handler=""
+                    if [[ -n "$handler" ]]; then
+                        # A handler draws whatever it likes, so nothing can be
+                        # assumed about the screen afterwards.
+                        tui_action_run "$act" || true
+                        tui_screen_invalidate
+                        continue
+                    fi ;;
             esac
 
         # A burst of movement is one movement. A wheel event becomes a run of
@@ -372,7 +395,7 @@ tui_menu_run() {
         motion="$(_tui_menu_motion_of "$act")" || continue
         local more
         while tui_key_read_now; do
-            more="$(tui_action_for main "$TUI_KEY")" || more=""
+            more="$(_tui_menu_act_main "$TUI_KEY")" || more=""
             more="$(_tui_menu_motion_of "$more")" || {
                 tui_key_unread
                 break

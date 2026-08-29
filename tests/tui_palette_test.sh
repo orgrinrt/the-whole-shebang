@@ -120,3 +120,182 @@ it_keeps_a_list_shorter_than_the_budget_whole() {
 it_is_safe_to_source_twice() {
     assert_ok . "${BASH_SOURCE[0]%/*}/../libs/tui/palette.sh"
 }
+
+# --- the loop ----------------------------------------------------------------
+#
+# It draws, so it needs the terminal modules. They were left out while only the
+# row and the match list were tested, which is how the module's one public
+# function ended up with no coverage at all: everything under it was tested and
+# the thing a caller actually invokes was not.
+
+. "${BASH_SOURCE[0]%/*}/../libs/tui/term.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/key.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/modal.sh"
+
+# Keys as the reader takes them off the input: bytes, not names.
+_pal_run() { tui_palette_run "t" < <(printf '%b' "$1") > /dev/null 2>&1; }
+
+#[test]
+it_hands_back_the_id_that_was_chosen() {
+    fixture
+    assert_ok _pal_run 'quit\r'
+    assert_eq "$TUI_PALETTE_CHOICE" "quit"
+}
+
+#[test]
+it_searches_the_label_as_well_as_the_id() {
+    # The label is what somebody remembers. `about` is reachable by its id and
+    # by "what this tool is for", and a palette that only matched ids would be
+    # a list of names nobody chose.
+    fixture
+    assert_ok _pal_run 'tool\r'
+    assert_eq "$TUI_PALETTE_CHOICE" "about"
+}
+
+#[test]
+an_empty_query_offers_everything_and_takes_the_first() {
+    # The frame it opens on. Refusing to choose there would mean the palette
+    # needing a query before it does anything, which is a search box rather
+    # than a list.
+    fixture
+    assert_ok _pal_run '\r'
+    assert_eq "$TUI_PALETTE_CHOICE" "section-prev"
+}
+
+#[test]
+the_arrows_move_the_selection() {
+    # Stated as a relation rather than as two ids, because which of the two
+    # section rows ranks first is the matcher's business and would pin an
+    # accident of it here. What movement has to do is land somewhere else.
+    fixture
+    _pal_run 'section\r'
+    local first="$TUI_PALETTE_CHOICE"
+    _pal_run 'section\033[B\r'
+    local second="$TUI_PALETTE_CHOICE"
+    assert_ne "$first" "$second"
+    assert_ok grep -q '^section-' <<< "$second"
+}
+
+#[test]
+moving_down_and_back_up_returns_to_where_it_started() {
+    fixture
+    _pal_run 'section\r'
+    local first="$TUI_PALETTE_CHOICE"
+    _pal_run 'section\033[B\033[A\r'
+    assert_eq "$TUI_PALETTE_CHOICE" "$first"
+}
+
+#[test]
+it_does_not_move_past_the_end_of_the_list() {
+    # Off the end the selection would index nothing and the chosen id would be
+    # empty, which reads to the caller exactly like a choice.
+    fixture
+    assert_ok _pal_run 'quit\033[B\033[B\033[B\r'
+    assert_eq "$TUI_PALETTE_CHOICE" "quit"
+}
+
+#[test]
+it_does_not_move_above_the_first_row() {
+    fixture
+    _pal_run 'section\r'
+    local first="$TUI_PALETTE_CHOICE"
+    assert_ok _pal_run 'section\033[A\033[A\r'
+    assert_eq "$TUI_PALETTE_CHOICE" "$first"
+}
+
+#[test]
+escape_chooses_nothing() {
+    fixture
+    TUI_PALETTE_CHOICE="left over"
+    assert_fails _pal_run '\033'
+    assert_empty "$TUI_PALETTE_CHOICE"
+}
+
+#[test]
+rubbing_past_the_start_leaves_it() {
+    # The way out is the way you came in, the same as the menu's own search.
+    fixture
+    assert_fails _pal_run '\177'
+    assert_empty "$TUI_PALETTE_CHOICE"
+}
+
+#[test]
+rubbing_out_a_letter_widens_the_list_again() {
+    # `zq` matches nothing; one rub leaves `z`, which still matches nothing;
+    # the second leaves nothing typed, and then enter takes the first row. If
+    # backspace only left the palette this could not be written at all.
+    fixture
+    assert_ok _pal_run 'zq\177\177\r'
+    assert_eq "$TUI_PALETTE_CHOICE" "section-prev"
+}
+
+#[test]
+enter_on_a_query_that_matches_nothing_chooses_nothing() {
+    # There is no row under the cursor, and the honest answer is to keep
+    # waiting rather than hand back an empty id that reads as a choice.
+    fixture
+    assert_fails _pal_run 'zzzz\r\033'
+    assert_empty "$TUI_PALETTE_CHOICE"
+}
+
+#[test]
+a_space_is_part_of_the_query_rather_than_a_choice() {
+    # The reader names it, so without an arm for it the space would fall
+    # through to the printable check, which a name five characters long fails.
+    fixture
+    assert_ok _pal_run 'the previous\r'
+    assert_eq "$TUI_PALETTE_CHOICE" "section-prev"
+}
+
+#[test]
+running_out_of_input_chooses_nothing() {
+    # A closed input is not a choice. It is what a caller sees when the
+    # terminal goes away underneath it.
+    fixture
+    TUI_PALETTE_CHOICE="left over"
+    assert_fails tui_palette_run "t" < /dev/null > /dev/null 2>&1
+    assert_empty "$TUI_PALETTE_CHOICE"
+}
+
+#[test]
+it_reaches_an_action_that_has_no_key_at_all() {
+    # The whole reason it exists. `about` is in the palette scope and answers
+    # to nothing, so if this could not be reached the palette would be a second
+    # way to do what a key already does.
+    fixture
+    assert_fails tui_action_for main "" 
+    assert_ok _pal_run 'about\r'
+    assert_eq "$TUI_PALETTE_CHOICE" "about"
+}
+
+# --- the round trip a caller makes -------------------------------------------
+
+#[test]
+it_runs_nothing_itself() {
+    # Stated in the module and worth pinning, because the menu leans on it: the
+    # palette hands back an id and the one dispatch on the other side decides
+    # what that means. A palette that ran what it could and left the rest would
+    # be worse than one that runs nothing.
+    fixture
+    local ran=0
+    _pal_handler() { ran=1; }
+    tui_action_add mine palette "a thing with a handler" "" _pal_handler
+    assert_ok _pal_run 'mine\r'
+    assert_eq "$TUI_PALETTE_CHOICE" "mine"
+    assert_eq "$ran" "0"
+    unset -f _pal_handler
+}
+
+#[test]
+what_it_hands_back_is_runnable_by_the_register() {
+    # The other half of that: the id is enough, because the handler is in the
+    # register beside it.
+    fixture
+    local ran=0
+    _pal_handler() { ran=1; }
+    tui_action_add mine palette "a thing with a handler" "" _pal_handler
+    _pal_run 'mine\r'
+    assert_ok tui_action_run "$TUI_PALETTE_CHOICE"
+    assert_eq "$ran" "1"
+    unset -f _pal_handler
+}

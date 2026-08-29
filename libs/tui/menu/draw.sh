@@ -382,6 +382,8 @@ _tui_menu_render() {
         [[ "$TUI_MENU_GROUP" != "section" ]] && how="${how}  by ${TUI_MENU_GROUP}"
         [[ "$TUI_MENU_SORT"  != "declared" ]] && how="${how}  ${TUI_MENU_SORT} order"
         [[ -n "$TUI_MENU_FILTER_ON" ]]        && how="${how}  ${TUI_MENU_FILTER_ON} only"
+        # Cheap: it returns on the first line unless the register moved.
+        declare -F _tui_menu_hint >/dev/null 2>&1 && _tui_menu_hint
         local hint="${_TUI_MENU_HINT:-}"
         [[ -n "$how" ]] && hint="${hint}${how}"
         (( TUI_MENU_HIDE_OFF == 1 )) && hint="${hint}   ${TUI_C_KEY}a${TUI_C_END}${TUI_C_MUTE} hiding what cannot run"
