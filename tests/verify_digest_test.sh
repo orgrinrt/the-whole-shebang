@@ -170,3 +170,55 @@ each_answer_has_words_of_its_own() {
     assert_ne "$(verify_say 2)" "$(verify_say 1)"
     assert_contains "$(verify_say 2)" "unverified"
 }
+
+# A broken installation is the third answer, and it says so in different words.
+#
+# `hash_sha256` missing gives 127, which used to fall to a catch-all arm that
+# returned the third answer and printed nothing at all. The verdict is right,
+# since nothing was learned about the file either way, and printing nothing is
+# what made it dangerous: the caller cannot tell the two apart from the return,
+# so a library that will not load reads exactly like a project that published
+# no sums, and `install.sh` installs on that word.
+#
+# What is asserted is both halves: the verdict stays 2, and the words differ.
+#[test]
+a_library_that_did_not_load_says_so_rather_than_looking_like_no_digest() {
+    _v_setup
+    local saved out rc
+    saved="$(declare -f hash_sha256)"
+    unset -f hash_sha256
+
+    out="$(verify_digest "$VROOT/f" "$VSUM" 2>&1)"; rc=$?
+    assert_eq "$rc" "2"
+    assert_ok grep -qi 'broken rather than unknown' <<<"$out"
+    assert_ok grep -qi 'hash_sha256 is not there' <<<"$out"
+
+    # And it does not read like the no-digest case, which is the confusion.
+    assert_fails grep -qi 'no digest published' <<<"$out"
+
+    eval "$saved"
+    _v_end
+}
+
+# The control for the test above: with the module present the same call is
+# quiet about installations and returns the first answer, so the assertions
+# there are reachable rather than true of anything.
+#[test]
+it_says_nothing_about_a_broken_install_when_nothing_is_broken() {
+    _v_setup
+    local out
+    out="$(verify_digest "$VROOT/f" "$VSUM" 2>&1)"
+    assert_fails grep -qi 'broken rather than unknown' <<<"$out"
+    _v_end
+}
+
+# An unreadable file is the third answer too, and it had no sentence either.
+#[test]
+a_file_that_cannot_be_read_is_unverified_and_says_which() {
+    _v_setup
+    local out rc
+    out="$(verify_digest "$VROOT/nosuch" "$VSUM" 2>&1)"; rc=$?
+    assert_eq "$rc" "2"
+    assert_ok grep -qi 'could not be read' <<<"$out"
+    _v_end
+}

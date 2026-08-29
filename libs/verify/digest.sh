@@ -65,9 +65,30 @@ verify_digest() {
     got="$(hash_sha256 "$path")"; rc=$?
     case "$rc" in
         0) : ;;
+        1) # `hash_sha256` has already said what it could not read. The verdict
+           # is the third answer because nothing was learned about the file,
+           # which is a different sentence from the one above it.
+           log_warn "verify: ${path##*/} is unverified, it could not be read"
+           return "$VERIFY_UNKNOWN" ;;
         2) log_warn "verify: ${path##*/} is unverified, this machine cannot hash"
            return "$VERIFY_UNKNOWN" ;;
-        *) return "$VERIFY_UNKNOWN" ;;
+        127)
+           # **This one is about the installation, not about the file.** 127 is
+           # the shell saying `hash_sha256` is not a command, which happens when
+           # `use hash` resolved against a nutshell that does not carry the
+           # module: an older pin, or a mirror an hour behind a merge.
+           #
+           # The verdict stays the third answer, since nothing was learned about
+           # the file either way, and that is the whole reason this needs a
+           # sentence of its own. A caller cannot tell the two apart from the
+           # return, so if this stays quiet it reads exactly like a project that
+           # published no sums, and downloads get installed under the impression
+           # something checked them.
+           log_error "verify: ${path##*/} is unverified, and this is broken rather than unknown"
+           log_error "verify: hash_sha256 is not there at all, so \`use hash\` found a nutshell without it"
+           return "$VERIFY_UNKNOWN" ;;
+        *) log_error "verify: ${path##*/} is unverified, hashing exited ${rc}"
+           return "$VERIFY_UNKNOWN" ;;
     esac
 
     got="$(printf '%s' "$got"  | tr 'A-F' 'a-f')"
