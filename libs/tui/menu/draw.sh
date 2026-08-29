@@ -133,30 +133,41 @@ _tui_menu_aside_width() {
     tui_layout_size side
 }
 
-# The panel itself, down the right, starting on the same row as the list.
-_tui_menu_render_aside() {
-    local width="$1" top_row="$2"
-    (( width > 0 )) || return 0
-    local left=$(( ${TUI_COLS:-80} - width + 1 ))
-    (( left < 1 )) && return 0
+# The panel down the right, as lines of exactly the given width, into
+# _TUI_MENU_ASIDE_LINES.
+#
+# Lines rather than cursor moves because the row it lands on is composed whole
+# now: a row written on its own would be erased by the next redraw of the list
+# row beside it, and one written after it would need the list row's visible
+# width, which costs a fork per row to measure.
+declare -ga _TUI_MENU_ASIDE_LINES=()
 
-    local row="$top_row" line label value shown
+_tui_menu_aside_lines() {
+    local width="$1"
+    _TUI_MENU_ASIDE_LINES=()
+    (( width > 0 )) || return 0
+
+    local line label value shown pad gap
     for line in ${TUI_MENU_ASIDE[@]+"${TUI_MENU_ASIDE[@]}"}; do
-        (( row >= TUI_ROWS - 5 )) && break
         IFS=$'\t' read -r label value <<< "$line"
-        tui_move "$row" "$left"
         if [[ -z "$value" ]]; then
             # A label on its own is a heading for the group under it.
-            printf '%s%s%s' "$TUI_C_HEAD" "$label" "$TUI_C_END"
-        else
             shown="$label"
-            (( ${#shown} > width - 2 )) && shown="${shown:0:$(( width - 2 ))}"
-            printf '%s%s%s' "$TUI_C_MUTE" "$shown" "$TUI_C_END"
-            local vrow=$(( ${#shown} ))
-            tui_move "$row" $(( left + width - ${#value} ))
-            (( ${#value} < width )) && printf '%s' "$value"
+            (( ${#shown} > width )) && shown="${shown:0:$width}"
+            printf -v pad '%*s' $(( width - ${#shown} )) ''
+            _TUI_MENU_ASIDE_LINES+=("${TUI_C_HEAD}${shown}${TUI_C_END}${pad}")
+            continue
         fi
-        row=$(( row + 1 ))
+        shown="$label"
+        (( ${#shown} > width - 2 )) && shown="${shown:0:$(( width - 2 ))}"
+        # The value is right-aligned, so the numbers line up down the panel
+        # rather than starting wherever their label happened to end.
+        local v="$value"
+        (( ${#v} > width )) && v="${v:0:$width}"
+        gap=$(( width - ${#shown} - ${#v} ))
+        (( gap < 1 )) && gap=1
+        printf -v pad '%*s' "$gap" ''
+        _TUI_MENU_ASIDE_LINES+=("${TUI_C_MUTE}${shown}${TUI_C_END}${pad}${v}")
     done
 }
 
@@ -224,27 +235,45 @@ _tui_menu_help() {
     tui_key_read || true
 }
 
-# The whole screen. Redrawn on every key, which at this size is cheaper than
-# tracking what changed and getting it wrong.
+# One frame, into the screen buffer, which then writes only the rows that
+# actually changed.
+#
+# It used to clear the screen and draw everything on every keypress, on the
+# reasoning that at this size it was cheaper than tracking what changed and
+# getting it wrong. That is true under a terminal emulator with a GPU behind it
+# and false on a bare console, which is the machine a maintenance tool runs on:
+# a cursor step there cost the better part of a second, and the whole screen
+# blinked doing it.
+#
+# The geometry is what decides whether the buffer can be trusted. A resize, or
+# anything else that wrote to the terminal behind its back, and it starts over.
+declare -g _TUI_MENU_GEOM=""
+
 _tui_menu_render() {
     local cursor="$1" top="$2" height="$3" title="$4"
-    local n i row=1 raw
+    local n i row raw line
     n=${#TUI_MENU_VIEW[@]}
 
-    tui_clear
-    tui_move $row 1; printf '%s%s%s' "$TUI_C_HEAD" "$title" "$TUI_C_END"; row=$(( row + 2 ))
-
-    if (( n == 0 )); then
-        tui_move $row 1
-        printf '%snothing matches %s%s' "$TUI_C_WARN" "\"${TUI_MENU_FILTER}\"" "$TUI_C_END"
+    local geom="${TUI_ROWS:-24}x${TUI_COLS:-80}"
+    if [[ "$geom" != "$_TUI_MENU_GEOM" ]]; then
+        tui_clear
+        tui_screen_invalidate
+        _TUI_MENU_GEOM="$geom"
     fi
+
+    tui_screen_begin
+    tui_screen_put 1 "${TUI_C_HEAD}${title}${TUI_C_END}"
 
     # The panel first, so the list knows how much width is left to cut its
     # labels to.
     local aside_w; aside_w="$(_tui_menu_aside_width)"
     local list_cols="${TUI_COLS:-80}"
     (( aside_w > 0 )) && list_cols=$(( list_cols - aside_w - 2 ))
-    _tui_menu_render_aside "$aside_w" 3
+    _tui_menu_aside_lines "$aside_w"
+
+    if (( n == 0 )); then
+        tui_screen_put 3 "${TUI_C_WARN}nothing matches \"${TUI_MENU_FILTER}\"${TUI_C_END}"
+    fi
 
     # The list, through the table, so its columns are the same columns every
     # other list in the interface uses. Built once and drawn once rather than a
@@ -252,6 +281,7 @@ _tui_menu_render() {
     # what makes a column a column.
     local saved_cols="$TUI_COLS"
     TUI_COLS="$list_cols"
+    local -a rows=()
     if declare -F tui_table_reset >/dev/null 2>&1; then
         # The name at a fixed width so the state lands in the same place on
         # every row, which is the whole reason it is a column. The note takes
@@ -267,6 +297,7 @@ _tui_menu_render() {
         tui_table_col name  "$name_w"
         tui_table_col state 6
         tui_table_col note  1fr min:16 --priority 5
+
         # Solved before the rows are built, because a heading's rule has to be
         # exactly the width of the column it sits in and nothing else knows
         # what that came out as. The render below solves again with the same
@@ -281,10 +312,35 @@ _tui_menu_render() {
             else                       _tui_menu_cells "$raw" 0 "${TUI_MENU_VHEAD[$i]:-}" "$rule_w"; fi
             tui_table_row "${_TUI_MENU_CELLS[@]}"
         done
-        tui_table_render --width "$list_cols" --at "$row" 1 --height "$height"
-        row=$(( row + n - top ))
+        # Captured rather than placed, so the panel beside it can be composed
+        # onto the same row. One fork a frame, against one per cell before.
+        while IFS= read -r line; do rows+=("$line"); done \
+            < <(tui_table_render --width "$list_cols" --height "$height")
     fi
     TUI_COLS="$saved_cols"
+
+    # The list and the panel share their rows, so they are joined here. A row
+    # is written whole or the two erase each other.
+    local body=$(( n - top ))
+    (( body < 0 )) && body=0
+    local aside_n="${#_TUI_MENU_ASIDE_LINES[@]}"
+    local span="$body"
+    (( aside_n > span )) && span="$aside_n"
+    local last=$(( TUI_ROWS - 6 ))
+    for (( i = 0; i < span; i++ )); do
+        row=$(( 3 + i ))
+        (( row > last )) && break
+        line="${rows[$i]-}"
+        if (( aside_w > 0 && i < aside_n )); then
+            # The table pads its cells, so a list line is already exactly the
+            # width of the list and nothing has to be measured to know where
+            # the panel starts.
+            local pad=""
+            (( ${#line} == 0 )) && printf -v pad '%*s' "$list_cols" ''
+            line="${line}${pad}  ${_TUI_MENU_ASIDE_LINES[$i]}"
+        fi
+        tui_screen_put "$row" "$line"
+    done
 
     # The note for whatever is under the cursor. Set apart by a rule and given
     # the label's own emphasis rather than dimmed into the background: dimmed
@@ -299,24 +355,22 @@ _tui_menu_render() {
     if [[ -n "$note" || -n "$what" ]]; then
         local rule
         printf -v rule '%*s' $(( ${TUI_COLS:-80} > 2 ? ${TUI_COLS:-80} - 1 : 1 )) ''
-        tui_move $(( TUI_ROWS - 4 )) 1
-        printf '%s%s%s' "$TUI_C_MUTE" "${rule// /$(_tui_menu_rule_char)}" "$TUI_C_END"
-        tui_move $(( TUI_ROWS - 3 )) 1
-        printf '%s%s%s' "$TUI_C_HEAD" "$what" "$TUI_C_END"
-        tui_move $(( TUI_ROWS - 2 )) 1
-        [[ -n "$note" ]] && printf '%s' "$note"
+        tui_screen_put $(( TUI_ROWS - 4 )) \
+            "${TUI_C_MUTE}${rule// /$(_tui_menu_rule_char)}${TUI_C_END}"
+        tui_screen_put $(( TUI_ROWS - 3 )) "${TUI_C_HEAD}${what}${TUI_C_END}"
+        tui_screen_put $(( TUI_ROWS - 2 )) "$note"
     fi
 
     # The filter is shown while it has content, because a list that is quietly
     # hiding rows and does not say so reads as a list with rows missing.
-    tui_move $(( TUI_ROWS - 1 )) 1
     if [[ -n "$TUI_MENU_FILTER" ]]; then
-        printf '%sfilter:%s %s%s%s' "$TUI_C_KEY" "$TUI_C_END" "$TUI_C_HEAD" "$TUI_MENU_FILTER" "$TUI_C_END"
+        tui_screen_put $(( TUI_ROWS - 1 )) \
+            "${TUI_C_KEY}filter:${TUI_C_END} ${TUI_C_HEAD}${TUI_MENU_FILTER}${TUI_C_END}"
     fi
 
-    tui_move "$TUI_ROWS" 1
     if (( ${_TUI_MENU_FILTERING:-0} == 1 )); then
-        printf '%s%s%s' "$TUI_C_MUTE" "typing to narrow   backspace   esc clears   enter choose" "$TUI_C_END"
+        tui_screen_put "$TUI_ROWS" \
+            "${TUI_C_MUTE}typing to narrow   backspace   esc clears   enter choose${TUI_C_END}"
     else
         # What is on, when it is not the default, because a list arranged some
         # other way and not saying so reads as a list in a strange order.
@@ -324,9 +378,11 @@ _tui_menu_render() {
         [[ "$TUI_MENU_GROUP" != "section" ]] && how="${how}  by ${TUI_MENU_GROUP}"
         [[ "$TUI_MENU_SORT"  != "declared" ]] && how="${how}  ${TUI_MENU_SORT} order"
         [[ -n "$TUI_MENU_FILTER_ON" ]]        && how="${how}  ${TUI_MENU_FILTER_ON} only"
-        local hint="up/down move   [ ] section   enter choose   / search   ? keys   q back"
+        local hint="${_TUI_MENU_HINT:-}"
         [[ -n "$how" ]] && hint="${hint}${how}"
         (( TUI_MENU_HIDE_OFF == 1 )) && hint="${hint}   ${TUI_C_KEY}a${TUI_C_END}${TUI_C_MUTE} hiding what cannot run"
-        printf '%s%s%s' "$TUI_C_MUTE" "$hint" "$TUI_C_END"
+        tui_screen_put "$TUI_ROWS" "${TUI_C_MUTE}${hint}${TUI_C_END}"
     fi
+
+    tui_screen_flush
 }

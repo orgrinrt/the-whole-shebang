@@ -73,7 +73,7 @@ needs a human to look at it.
 
 ## tui
 
-Fourteen modules for a terminal interface, taken on their own like everything else here.
+Fifteen modules for a terminal interface, taken on their own like everything else here.
 Written for a bootable maintenance tool, which is what set the constraints.
 
 `tui/term` enters and leaves a full-screen session and puts the terminal back however the
@@ -95,6 +95,13 @@ three lists that drift. A binding is named, `bracket-left` and not `[`, which is
 lets a config file point at it and what makes it rebindable on a layout that cannot
 produce the character: on a Finnish keyboard `[` is AltGr+8 and a bare console does not
 deliver it at all.
+
+`tui/screen` writes only the rows that changed. A whole-screen redraw on every keypress
+is imperceptible under a terminal emulator with a gpu behind it and close to a second on
+a bare console, which is the machine a maintenance tool tends to run on, so a frame is
+built as rows and the flush compares them against the ones already up there. A cursor
+step costs two rows and a filter keystroke costs most of them, and neither case has to be
+recognised for that to come out right.
 
 `tui/palette` is the other way to reach an action, for when a key is a thing you would
 have had to already know. Type a few letters of what you want and pick it off the list,

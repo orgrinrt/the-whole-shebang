@@ -24,11 +24,13 @@ tui::layout              libs/tui/layout.sh
 tui::menu                libs/tui/menu.sh
 tui::palette             libs/tui/palette.sh
 tui::menu::draw          libs/tui/menu/draw.sh    internal
+tui::menu::keys          libs/tui/menu/keys.sh    internal
 tui::menu::view          libs/tui/menu/view.sh    internal
 tui::modal               libs/tui/modal.sh
 tui::plan                libs/tui/plan.sh
 tui::progress            libs/tui/progress.sh
 tui::report              libs/tui/report.sh
+tui::screen              libs/tui/screen.sh
 tui::run                 libs/tui/run.sh
 tui::table               libs/tui/table.sh
 tui::term                libs/tui/term.sh

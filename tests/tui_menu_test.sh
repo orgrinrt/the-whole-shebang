@@ -10,7 +10,12 @@ use test
 . "${BASH_SOURCE[0]%/*}/../libs/tui/term.sh"
 . "${BASH_SOURCE[0]%/*}/../libs/tui/key.sh"
 . "${BASH_SOURCE[0]%/*}/../libs/tui/layout.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/action.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/screen.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/modal.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/palette.sh"
 . "${BASH_SOURCE[0]%/*}/../libs/tui/menu.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/menu/keys.sh"
 . "${BASH_SOURCE[0]%/*}/../libs/tui/menu/view.sh"
 . "${BASH_SOURCE[0]%/*}/../libs/tui/menu/draw.sh"
 
@@ -199,7 +204,11 @@ it_shows_the_cursor_row_at_every_height_from_one_upward() {
 
 #[test]
 it_is_safe_to_source_twice() {
-    assert_ok . "${BASH_SOURCE[0]%/*}/../libs/tui/menu.sh"
+    assert_ok . "${BASH_SOURCE[0]%/*}/../libs/tui/action.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/screen.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/modal.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/palette.sh"
+. "${BASH_SOURCE[0]%/*}/../libs/tui/menu.sh"
 }
 
 # --- filtering ---------------------------------------------------------------
