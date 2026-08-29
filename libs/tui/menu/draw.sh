@@ -146,24 +146,17 @@ _tui_menu_render_aside() {
 }
 
 #[pub]
-# The keys this menu answers to, as "key<tab>what it does" lines. Public so a
-# caller can show them somewhere of its own, and so `?` has one source rather
-# than a second list that drifts from the first.
-# Usage: tui_menu_keys
+# The keys this menu answers to, as "keys<tab>what it does" lines. Public so a
+# caller can show them somewhere of its own.
+#
+# Read off the action register rather than written out here, so a rebound key
+# prints as the key it is now. The list this replaced was a second copy that
+# said `[ ]` whatever anybody had bound, which is the drift the register exists
+# to make impossible.
+# Usage: tui_menu_keys [scope]
 tui_menu_keys() {
-    printf '%s\n' \
-        $'up down\tmove, wrapping at either end' \
-        $'[ ]\tby section, or a modifier with up and down' \
-        $'home end\tfirst and last' \
-        $'pgup pgdn\tby a screen' \
-        $'enter\tchoose' \
-        $'/\tsearch the name, the id and the note' \
-        $'a\tshow or hide what cannot be run' \
-        $'f\tfilter: a question about the row, not a word in it' \
-        $'g\tgroup by section, by kind, or not at all' \
-        $'s\tsort by the order declared, by name, or by state' \
-        $'?\tthis' \
-        $'q\tback'
+    (( _TUI_MENU_BOUND )) || tui_menu_bindings
+    tui_action_lines "${1:-main}"
 }
 
 # The help screen. Everything the interface can say about itself, in one place
@@ -185,7 +178,23 @@ _tui_menu_help() {
         tui_move $row 1
         printf '  %s%-12s%s %s' "$TUI_C_KEY" "$key" "$TUI_C_END" "$what"
         row=$(( row + 1 ))
-    done < <(tui_menu_keys)
+    done < <(tui_menu_keys main)
+
+    # The search is a mode with its own keys, and a help screen that listed
+    # only the outer ones would leave somebody in there with no way to find out
+    # what backspace does.
+    if [[ -n "$(tui_menu_keys filter)" ]]; then
+        row=$(( row + 1 ))
+        tui_move $row 1
+        printf '%sWhile searching%s' "$TUI_C_HEAD" "$TUI_C_END"; row=$(( row + 2 ))
+        while IFS=$'\t' read -r key what; do
+            [[ -n "$key" ]] || continue
+            (( row >= TUI_ROWS - 1 )) && break
+            tui_move $row 1
+            printf '  %s%-12s%s %s' "$TUI_C_KEY" "$key" "$TUI_C_END" "$what"
+            row=$(( row + 1 ))
+        done < <(tui_menu_keys filter)
+    fi
 
     if [[ -n "$TUI_MENU_HELP" ]]; then
         row=$(( row + 1 ))

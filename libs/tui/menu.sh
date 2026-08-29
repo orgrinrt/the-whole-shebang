@@ -201,8 +201,73 @@ _tui_menu_passes_filter() {
 
 # -----------------------------------------------------------------------------
 
+use super::tui::action
 use super::tui::menu::view
 use super::tui::menu::draw
+
+# -----------------------------------------------------------------------------
+# The keys, as actions
+# -----------------------------------------------------------------------------
+
+# Installed on the first run unless a caller installed them itself, so that a
+# caller wanting different keys can call this, rebind, and then run.
+declare -gi _TUI_MENU_BOUND=0
+
+#[pub]
+# Put the menu's own actions in the register, with the keys they ship with.
+#
+# Every key the menu answers to is here, movement included, because a key that
+# is dispatched somewhere else is a key `?` cannot list and a keymap cannot
+# reach. That is the whole reason the register exists.
+# Usage: tui_menu_bindings
+tui_menu_bindings() {
+    tui_action_add menu-up       main "move up, wrapping at the top"    "up k ctrl-p shift-tab"
+    tui_action_add menu-down     main "move down, wrapping at the end"  "down j ctrl-n tab"
+    tui_action_add menu-first    main "to the first row"                "home"
+    tui_action_add menu-last     main "to the last row"                 "end"
+    tui_action_add menu-page-up  main "up by a screen"                  "pgup"
+    tui_action_add menu-page-down main "down by a screen"               "pgdn"
+    # Two keys each, and neither is guaranteed. A terminal can swallow the
+    # modified arrow and a keyboard layout can withhold the bracket, so the
+    # answer is that both reach it and either can be rebound to something the
+    # machine in front of you actually sends.
+    tui_action_add section-prev  main "to the previous section"  "bracket-left ctrl-up alt-up"
+    tui_action_add section-next  main "to the next section"      "bracket-right ctrl-down alt-down"
+    tui_action_add menu-search   main "search the name, the id and the note" "slash"
+    tui_action_add menu-hidden   main "show or hide what cannot be run"      "a"
+    tui_action_add menu-filter   main "filter: a question about the row, not a word in it" "f"
+    tui_action_add menu-group    main "group by section, by kind, or not at all"           "g"
+    tui_action_add menu-sort     main "sort by the order declared, by name, or by state"   "s"
+    tui_action_add menu-help     main "this"    "question"
+    tui_action_add menu-choose   main "choose"  "enter space"
+    tui_action_add menu-back     main "back"    "q esc ctrl-c"
+    # The search is a mode, so its keys are their own namespace: in there every
+    # printable key types, and only the ones that cannot be part of a phrase
+    # keep a meaning. Registered rather than left in a `case` for the same
+    # reason as the rest, so `?` can show them and a keymap can move them.
+    tui_action_add search-leave  filter "leave the search, keeping nothing"  "esc"
+    tui_action_add search-accept filter "choose the row under the cursor"    "enter"
+    tui_action_add search-rub    filter "rub out a letter, or leave when there are none" "backspace"
+    tui_action_add search-quit   filter "back"                               "ctrl-c"
+    _TUI_MENU_BOUND=1
+}
+
+# Which motion an action id means, or nothing when the id does not move the
+# cursor. One place, so the dispatch and the coalescing agree by construction
+# rather than by two lists somebody has to keep in step.
+_tui_menu_motion_of() {
+    case "$1" in
+        menu-up)        printf 'up' ;;
+        menu-down)      printf 'down' ;;
+        menu-first)     printf 'home' ;;
+        menu-last)      printf 'end' ;;
+        menu-page-up)   printf 'pgup' ;;
+        menu-page-down) printf 'pgdn' ;;
+        section-prev)   printf 'section-prev' ;;
+        section-next)   printf 'section-next' ;;
+        *)              return 1 ;;
+    esac
+}
 
 
 # -----------------------------------------------------------------------------
@@ -220,8 +285,9 @@ tui_menu_run() {
     local title="${1:-}" n="${#TUI_MENU_ID[@]}"
     TUI_MENU_CHOICE=""
     (( n > 0 )) || return 1
+    (( _TUI_MENU_BOUND )) || tui_menu_bindings
 
-    local cursor top height raw motion filtering=0
+    local cursor top height raw motion act filtering=0
     tui_menu_refilter
     cursor="$(_tui_menu_first)"
     _tui_menu_landable "$cursor" || return 1     # headings only, nothing to pick
@@ -242,95 +308,102 @@ tui_menu_run() {
         # cannot work here: every letter a person would search for is also a
         # key that already means something, so `chroot` would quit at the h.
         if (( filtering == 0 )); then
-            if [[ "$TUI_KEY" == "/" ]]; then
-                filtering=1; continue
-            fi
-            if [[ "$TUI_KEY" == "?" ]]; then
-                _tui_menu_help "$title"; continue
-            fi
-            if [[ "$TUI_KEY" == "g" ]]; then
-                tui_menu_group_next
-                tui_menu_refilter
-                cursor="$(_tui_menu_first)"; top=0; continue
-            fi
-            if [[ "$TUI_KEY" == "s" ]]; then
-                tui_menu_sort_next
-                tui_menu_refilter
-                cursor="$(_tui_menu_first)"; top=0; continue
-            fi
-            if [[ "$TUI_KEY" == "f" ]]; then
-                # A filter is a question about the row, and the search is text
-                # somebody typed. Two keys, because they are two things.
-                tui_menu_filter_on "$(_tui_menu_filter_next)"
-                tui_menu_refilter
-                cursor="$(_tui_menu_first)"
-                # Filtered down to nothing is a blank screen with no way out
-                # but q, so it turns itself back off rather than stranding
-                # somebody in an empty list.
-                if (( ${#TUI_MENU_VIEW[@]} == 0 )); then
-                    tui_menu_filter_on ""
+            # One lookup, and everything below dispatches on what the key
+            # means rather than on which key it was. A key nobody bound falls
+            # through and does nothing, which is what it should do.
+            act="$(tui_action_for main "$TUI_KEY")" || act=""
+            case "$act" in
+                menu-search) filtering=1; continue ;;
+                menu-help)   _tui_menu_help "$title"; continue ;;
+                menu-group)
+                    tui_menu_group_next
+                    tui_menu_refilter
+                    cursor="$(_tui_menu_first)"; top=0; continue ;;
+                menu-sort)
+                    tui_menu_sort_next
+                    tui_menu_refilter
+                    cursor="$(_tui_menu_first)"; top=0; continue ;;
+                menu-filter)
+                    # A filter is a question about the row, and the search is
+                    # text somebody typed. Two keys, because they are two
+                    # things.
+                    tui_menu_filter_on "$(_tui_menu_filter_next)"
                     tui_menu_refilter
                     cursor="$(_tui_menu_first)"
-                fi
-                top=0; continue
-            fi
-            if [[ "$TUI_KEY" == "a" ]]; then
-                TUI_MENU_HIDE_OFF=$(( 1 - TUI_MENU_HIDE_OFF ))
-                tui_menu_refilter
-                cursor="$(_tui_menu_first)"; top=0
-                # Everything may have gone: a set where nothing can run, with
-                # the unavailable hidden, is an empty list. Turn it back rather
-                # than leaving a blank screen with no way out but q.
-                if ! _tui_menu_landable "$cursor"; then
+                    # Filtered down to nothing is a blank screen with no way
+                    # out but q, so it turns itself back off rather than
+                    # stranding somebody in an empty list.
+                    if (( ${#TUI_MENU_VIEW[@]} == 0 )); then
+                        tui_menu_filter_on ""
+                        tui_menu_refilter
+                        cursor="$(_tui_menu_first)"
+                    fi
+                    top=0; continue ;;
+                menu-hidden)
                     TUI_MENU_HIDE_OFF=$(( 1 - TUI_MENU_HIDE_OFF ))
                     tui_menu_refilter
-                    cursor="$(_tui_menu_first)"
-                fi
-                continue
-            fi
-            if tui_key_is_accept; then
-                (( ${#TUI_MENU_VIEW[@]} > 0 )) || continue
-                raw="${TUI_MENU_VIEW[$cursor]:-$cursor}"
-                TUI_MENU_CHOICE="${TUI_MENU_ID[$raw]}"
-                tui_raw_off; return 0
-            fi
-            if tui_key_is_cancel; then
-                # Leaving with a filter still applied would hide rows from the
-                # next visit, so clear it on the way out.
-                if [[ -n "$TUI_MENU_FILTER" ]]; then
-                    TUI_MENU_FILTER=""; tui_menu_refilter
-                    cursor="$(_tui_menu_first)"; top=0; continue
-                fi
-                tui_raw_off; return 1
-            fi
-        else
-            # In filter mode every printable key types. Only the keys that
-            # cannot be part of a search phrase keep their meaning.
-            case "$TUI_KEY" in
-                esc)
-                    filtering=0
-                    TUI_MENU_FILTER=""; tui_menu_refilter
-                    cursor="$(_tui_menu_first)"; top=0; continue ;;
-                ctrl-c) tui_raw_off; return 1 ;;
-                enter)
+                    cursor="$(_tui_menu_first)"; top=0
+                    # Everything may have gone: a set where nothing can run,
+                    # with the unavailable hidden, is an empty list. Turn it
+                    # back rather than leaving a blank screen with no way out
+                    # but q.
+                    if ! _tui_menu_landable "$cursor"; then
+                        TUI_MENU_HIDE_OFF=$(( 1 - TUI_MENU_HIDE_OFF ))
+                        tui_menu_refilter
+                        cursor="$(_tui_menu_first)"
+                    fi
+                    continue ;;
+                menu-choose)
                     (( ${#TUI_MENU_VIEW[@]} > 0 )) || continue
                     raw="${TUI_MENU_VIEW[$cursor]:-$cursor}"
                     TUI_MENU_CHOICE="${TUI_MENU_ID[$raw]}"
                     tui_raw_off; return 0 ;;
-                backspace)
+                menu-back)
+                    # Leaving with a filter still applied would hide rows from
+                    # the next visit, so clear it on the way out.
+                    if [[ -n "$TUI_MENU_FILTER" ]]; then
+                        TUI_MENU_FILTER=""; tui_menu_refilter
+                        cursor="$(_tui_menu_first)"; top=0; continue
+                    fi
+                    tui_raw_off; return 1 ;;
+            esac
+        else
+            # In filter mode every printable key types. Only the keys that
+            # cannot be part of a search phrase keep their meaning, and those
+            # are their own scope in the register rather than a second list.
+            act="$(tui_action_for filter "$TUI_KEY")" || act=""
+            case "$act" in
+                search-leave)
+                    filtering=0
+                    TUI_MENU_FILTER=""; tui_menu_refilter
+                    cursor="$(_tui_menu_first)"; top=0; continue ;;
+                search-quit) tui_raw_off; return 1 ;;
+                search-accept)
+                    (( ${#TUI_MENU_VIEW[@]} > 0 )) || continue
+                    raw="${TUI_MENU_VIEW[$cursor]:-$cursor}"
+                    TUI_MENU_CHOICE="${TUI_MENU_ID[$raw]}"
+                    tui_raw_off; return 0 ;;
+                search-rub)
                     # Backspacing past the start leaves filter mode, so the
                     # way out is the way you came in.
                     if [[ -z "$TUI_MENU_FILTER" ]]; then filtering=0; continue; fi
                     TUI_MENU_FILTER="${TUI_MENU_FILTER%?}" ;;
-                space) TUI_MENU_FILTER+=" " ;;
-                up|down|left|right|pgup|pgdn|home|end) : ;;
                 *)
-                    if [[ ${#TUI_KEY} -eq 1 && "$TUI_KEY" == [[:print:]] ]]; then
-                        TUI_MENU_FILTER+="$TUI_KEY"
-                    fi ;;
+                    case "$TUI_KEY" in
+                        space) TUI_MENU_FILTER+=" " ;;
+                        up|down|left|right|pgup|pgdn|home|end) : ;;
+                        *)
+                            if [[ ${#TUI_KEY} -eq 1 && "$TUI_KEY" == [[:print:]] ]]; then
+                                TUI_MENU_FILTER+="$TUI_KEY"
+                            fi ;;
+                    esac ;;
             esac
+            # The cursor keys still move while the search is open, so a phrase
+            # can be typed and a row picked without leaving it. Everything else
+            # changed the phrase, so the list is rebuilt.
             case "$TUI_KEY" in
-                up|down|left|right|pgup|pgdn|home|end) ;;
+                up|down|left|right|pgup|pgdn|home|end)
+                    act="$(tui_action_for main "$TUI_KEY")" || act="" ;;
                 *) tui_menu_refilter; cursor="$(_tui_menu_first)"; top=0; continue ;;
             esac
         fi
@@ -343,52 +416,36 @@ tui_menu_run() {
         # Only movement is absorbed. The first key that is not movement ends
         # the run and is handed back, so nothing that acts on a row is ever
         # swallowed by a scroll.
-        tui_key_motion_now; motion="$TUI_MOTION"
-        if _tui_menu_is_motion "$motion"; then
-            local more
-            while tui_key_read_now; do
-                tui_key_motion_now; more="$TUI_MOTION"
-                if ! _tui_menu_is_motion "$more"; then
-                    tui_key_unread
-                    break
-                fi
-                cursor="$(_tui_menu_move "$cursor" "$motion" "$height")"
-                motion="$more"
-            done
-        fi
+        motion="$(_tui_menu_motion_of "$act")" || continue
+        local more
+        while tui_key_read_now; do
+            more="$(tui_action_for main "$TUI_KEY")" || more=""
+            more="$(_tui_menu_motion_of "$more")" || {
+                tui_key_unread
+                break
+            }
+            cursor="$(_tui_menu_move "$cursor" "$motion" "$height")"
+            motion="$more"
+        done
 
-        # A modifier with an arrow moves by section. Which modifier is whatever
-        # the terminal sends, since a console that sends none of them is
-        # exactly the console this has to work in, and `[` and `]` are the
-        # fallback that always arrives.
         cursor="$(_tui_menu_move "$cursor" "$motion" "$height")"
     done
     tui_raw_off
     return 1
 }
 
-# Is this key one that only moves the cursor? The ones that are safe to absorb
-# a run of without drawing, because the run's only effect is where the cursor
-# ends up.
-_tui_menu_is_motion() {
-    case "$1" in
-        up|down|home|end|pgup|pgdn|'['|']'|*-up|*-down) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
 # One movement, so absorbing a run and applying the last one are the same code.
 _tui_menu_move() {
     local cursor="$1" motion="$2" height="$3"
     case "$motion" in
-        up)         _tui_menu_step "$cursor" -1 ;;
-        down)       _tui_menu_step "$cursor"  1 ;;
-        home)       _tui_menu_first ;;
-        end)        _tui_menu_step "$(_tui_menu_first)" -1 ;;
-        pgup)       _tui_menu_step "$cursor" -"$height" ;;
-        pgdn)       _tui_menu_step "$cursor"  "$height" ;;
-        *-up|'[')   _tui_menu_section_step "$cursor" -1 ;;
-        *-down|']') _tui_menu_section_step "$cursor"  1 ;;
-        *)          printf '%d' "$cursor" ;;
+        up)           _tui_menu_step "$cursor" -1 ;;
+        down)         _tui_menu_step "$cursor"  1 ;;
+        home)         _tui_menu_first ;;
+        end)          _tui_menu_step "$(_tui_menu_first)" -1 ;;
+        pgup)         _tui_menu_step "$cursor" -"$height" ;;
+        pgdn)         _tui_menu_step "$cursor"  "$height" ;;
+        section-prev) _tui_menu_section_step "$cursor" -1 ;;
+        section-next) _tui_menu_section_step "$cursor"  1 ;;
+        *)            printf '%d' "$cursor" ;;
     esac
 }

@@ -73,7 +73,7 @@ needs a human to look at it.
 
 ## tui
 
-Twelve modules for a terminal interface, taken on their own like everything else here.
+Thirteen modules for a terminal interface, taken on their own like everything else here.
 Written for a bootable maintenance tool, which is what set the constraints.
 
 `tui/term` enters and leaves a full-screen session and puts the terminal back however the
@@ -88,9 +88,19 @@ means rather than for the colour itself.
 `tui/key` names a keypress, so nothing above it ever has to match an escape sequence.
 Arrows, vi keys and the emacs pairs all fold to the same four names.
 
+`tui/action` holds what an interface can do, as data rather than as a `case` over
+characters. An action carries an id, a label, which keys reach it and where it applies,
+so the key line, the help screen and the palette are all reads of one register instead of
+three lists that drift. A binding is named, `bracket-left` and not `[`, which is what
+lets a config file point at it and what makes it rebindable on a layout that cannot
+produce the character: on a Finnish keyboard `[` is AltGr+8 and a bare console does not
+deliver it at all.
+
 `tui/menu` is a list with headings the cursor skips over, and a viewport that keeps the
 cursor in view. The cursor is a ring: up from the first row is the last one. `[` and `]`
-move by section, and so does a modifier with an arrow.
+move by section, and so do ctrl and alt with an arrow, since a terminal can swallow the
+modified arrow and a layout can withhold the bracket. Every key it answers to sits in the
+register above, so all of them can be moved.
 
 Three things arrange it, and they are three different questions. `g` groups by the
 section a row was declared under, by its kind, or not at all, making its own headings

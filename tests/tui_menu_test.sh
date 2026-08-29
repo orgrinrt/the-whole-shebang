@@ -955,14 +955,61 @@ it_lands_where_the_whole_run_would_have_landed() {
 }
 
 #[test]
-it_knows_which_keys_only_move_the_cursor() {
+it_knows_which_actions_only_move_the_cursor() {
+    # What may be absorbed in a burst without drawing, because the run's only
+    # effect is where the cursor ends up. Anything that acts on a row must not
+    # be in here, or a scroll would swallow it.
+    local id
+    for id in menu-up menu-down menu-first menu-last menu-page-up \
+              menu-page-down section-prev section-next; do
+        assert_ok _tui_menu_motion_of "$id"
+    done
+    for id in menu-choose menu-back menu-search menu-help menu-hidden \
+              menu-group menu-sort search-leave search-accept '' nonsense; do
+        assert_fails _tui_menu_motion_of "$id"
+    done
+}
+
+#[test]
+it_reaches_section_movement_by_every_key_it_ships_with() {
+    # The one op could not press. `[` is AltGr+8 on a Finnish layout and a bare
+    # console does not deliver it, so the modified arrows have to reach it too,
+    # and all of them have to be rebindable.
+    tui_menu_bindings
+    assert_eq "$(tui_action_for main '[')"         "section-prev"
+    assert_eq "$(tui_action_for main 'ctrl-up')"   "section-prev"
+    assert_eq "$(tui_action_for main 'alt-up')"    "section-prev"
+    assert_eq "$(tui_action_for main ']')"         "section-next"
+    assert_eq "$(tui_action_for main 'ctrl-down')" "section-next"
+    assert_eq "$(tui_action_for main 'alt-down')"  "section-next"
+}
+
+#[test]
+it_binds_every_key_the_menu_answers_to() {
+    # A key dispatched somewhere other than the register is a key `?` cannot
+    # list and a keymap cannot reach, which is the whole reason it exists.
+    tui_menu_bindings
     local k
-    for k in up down home end pgup pgdn '[' ']' ctrl-up shift-down; do
-        assert_ok _tui_menu_is_motion "$k"
+    for k in up down k j home end pgup pgdn enter space q esc \
+             '/' '?' a g s f tab shift-tab; do
+        assert_ok tui_action_for main "$k"
     done
-    for k in enter q '/' '?' a g s f esc space; do
-        assert_fails _tui_menu_is_motion "$k"
+    for k in esc enter backspace ctrl-c; do
+        assert_ok tui_action_for filter "$k"
     done
+    # And nothing collides, in either scope.
+    assert_fails tui_action_conflicts
+}
+
+#[test]
+it_lets_the_whole_key_set_be_rebound_before_running() {
+    # The caller installs the defaults itself, rebinds, and the run leaves them
+    # alone. Without this a keymap would be overwritten by the first draw.
+    tui_menu_bindings
+    tui_action_bind section-next "f2"
+    assert_eq "$(tui_action_keys section-next)" "f2"
+    assert_eq "$_TUI_MENU_BOUND" "1"
+    assert_fails tui_action_for main ']'
 }
 
 #[test]
@@ -1147,4 +1194,35 @@ it_says_in_the_readme_as_many_modules_as_it_declares() {
         *) n=0 ;;
     esac
     assert_eq "$n" "$declared"
+}
+
+#[test]
+it_prints_a_key_line_that_follows_a_rebind() {
+    # The list this replaced was a second copy, and it said `[ ]` whatever
+    # anybody had bound. A key line that lies about which key to press is worse
+    # than no key line, because somebody presses what it says.
+    tui_menu_bindings
+    assert_ok grep -q '^\[ ctrl-up alt-up' <(tui_menu_keys main)
+    tui_action_bind section-prev "f3"
+    assert_ok    grep -q '^f3' <(tui_menu_keys main)
+    assert_fails grep -q '^\[' <(tui_menu_keys main)
+}
+
+#[test]
+it_prints_the_search_keys_under_their_own_scope() {
+    tui_menu_bindings
+    assert_eq "$(tui_menu_keys filter | wc -l | tr -d ' ')" "4"
+    assert_ok grep -q 'rub out a letter' <(tui_menu_keys filter)
+    # And they stay out of the outer list, because in the outer list those keys
+    # mean other things.
+    assert_fails grep -q 'rub out a letter' <(tui_menu_keys main)
+}
+
+#[test]
+it_installs_the_bindings_itself_when_a_caller_did_not() {
+    tui_action_reset
+    _TUI_MENU_BOUND=0
+    assert_fails tui_action_for main 'q'
+    tui_menu_keys >/dev/null
+    assert_eq "$(tui_action_for main 'q')" "menu-back"
 }

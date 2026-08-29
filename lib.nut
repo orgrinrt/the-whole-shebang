@@ -6,6 +6,7 @@
 
 diagnostics::findings    libs/diagnostics/findings.sh
 verify::digest           libs/verify/digest.sh
+tui::action              libs/tui/action.sh
 tui::confirm             libs/tui/confirm.sh
 tui::frame               libs/tui/frame.sh
 # Reads one keypress at a time from a terminal, with a timeout short enough to
