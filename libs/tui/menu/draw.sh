@@ -47,11 +47,21 @@ declare -gi TUI_MENU_STATE_COL="${TUI_MENU_STATE_COL:-34}"
 declare -ga _TUI_MENU_CELLS=()
 
 _tui_menu_cells() {
-    local i="$1" selected="$2" heading="${3:-}"
+    local i="$1" selected="$2" heading="${3:-}" rule_w="${4:-0}"
     _TUI_MENU_CELLS=()
 
-    # A heading spans the row rather than filling the columns: it is a label
-    # for what follows, not a thing with a state.
+    # A heading is a label for what follows rather than a thing with a state,
+    # so it takes no mark and no state word.
+    #
+    # It carries a rule out to the right edge, which is the whole of what makes
+    # it look like a heading. Without one it is a row of ordinary text in the
+    # name column, at the same indent as every entry, and a section break that
+    # reads as an entry is worse than no section break: the eye has nothing to
+    # catch on and the label looks like something that can be chosen.
+    #
+    # The width is passed in because the caller has solved the columns and this
+    # has not. Filling a long run and letting the table cut it looks like a
+    # rule that ran out of room, since the cut leaves an ellipsis behind.
     if (( i < 0 )) || [[ "${TUI_MENU_STATE[$i]}" == "heading" ]]; then
         local label="$heading"
         # Only a declared heading has a row to read its label from. For an
@@ -59,7 +69,12 @@ _tui_menu_cells() {
         # element rather than an error, so a heading whose label was somehow
         # empty would silently draw the last row's text.
         [[ -n "$label" || $i -lt 0 ]] || label="${TUI_MENU_TEXT[$i]}"
-        _TUI_MENU_CELLS=("" "${TUI_C_HEAD}${label}${TUI_C_END}" "" "")
+        local bar=""
+        if (( rule_w > 0 )); then
+            printf -v bar '%*s' "$rule_w" ''
+            bar="${TUI_C_MUTE}${bar// /$(_tui_menu_rule_char)}${TUI_C_END}"
+        fi
+        _TUI_MENU_CELLS=("" "${TUI_C_HEAD}${label}${TUI_C_END}" "" "$bar")
         return 0
     fi
 
@@ -252,10 +267,18 @@ _tui_menu_render() {
         tui_table_col name  "$name_w"
         tui_table_col state 6
         tui_table_col note  1fr min:16 --priority 5
+        # Solved before the rows are built, because a heading's rule has to be
+        # exactly the width of the column it sits in and nothing else knows
+        # what that came out as. The render below solves again with the same
+        # width and gets the same answer.
+        local rule_w=0
+        _tui_table_solve "$list_cols" && rule_w="$(tui_table_width note)"
+        [[ "$rule_w" =~ ^[0-9]+$ ]] || rule_w=0
+
         for (( i = top; i < top + height && i < n; i++ )); do
             raw="${TUI_MENU_VIEW[$i]:-$i}"
-            if (( i == cursor )); then _tui_menu_cells "$raw" 1 "${TUI_MENU_VHEAD[$i]:-}"
-            else                       _tui_menu_cells "$raw" 0 "${TUI_MENU_VHEAD[$i]:-}"; fi
+            if (( i == cursor )); then _tui_menu_cells "$raw" 1 "${TUI_MENU_VHEAD[$i]:-}" "$rule_w"
+            else                       _tui_menu_cells "$raw" 0 "${TUI_MENU_VHEAD[$i]:-}" "$rule_w"; fi
             tui_table_row "${_TUI_MENU_CELLS[@]}"
         done
         tui_table_render --width "$list_cols" --at "$row" 1 --height "$height"

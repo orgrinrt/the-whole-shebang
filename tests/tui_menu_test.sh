@@ -1352,3 +1352,59 @@ it_narrows_the_list_as_the_phrase_grows() {
     # Delve and Delta now, and Depth has gone.
     assert_eq "${#TUI_MENU_VIEW[@]}" "4"
 }
+
+# --- headings look like headings ---------------------------------------------
+
+#[test]
+it_gives_a_heading_a_rule_of_exactly_the_column_width() {
+    # Cut to the column instead, the table leaves an ellipsis behind and the
+    # rule reads as one that ran out of room rather than as a rule.
+    fixture
+    _tui_menu_cells 0 0 "" 27
+    assert_eq "$(printf '%s' "${_TUI_MENU_CELLS[3]}" | sed 's/\x1b\[[0-9;]*m//g' | wc -c | tr -d ' ')" \
+              "$(( 27 * $(printf '%s' "$(_tui_menu_rule_char)" | wc -c | tr -d ' ') ))"
+}
+
+#[test]
+it_draws_no_rule_where_there_is_no_room_for_one() {
+    # The note column is the first thing dropped on a narrow screen, and a
+    # heading is still a heading without its rule.
+    fixture
+    _tui_menu_cells 0 0 "" 0
+    assert_empty "${_TUI_MENU_CELLS[3]}"
+    _tui_menu_cells 0 0 ""
+    assert_empty "${_TUI_MENU_CELLS[3]}"
+}
+
+#[test]
+it_takes_no_mark_and_no_state_on_a_heading() {
+    # A heading is a label for what follows, not a thing that can be chosen or
+    # that has a state, and a state word beside one says it is both.
+    fixture
+    _tui_menu_cells 0 1 "" 10
+    assert_empty "${_TUI_MENU_CELLS[0]}"
+    assert_empty "${_TUI_MENU_CELLS[2]}"
+    assert_ok grep -q 'Disk' <<< "${_TUI_MENU_CELLS[1]}"
+}
+
+#[test]
+it_fills_the_row_to_the_edge_and_no_further() {
+    # Measured rather than reasoned about: the whole rendered heading row is
+    # exactly the width asked for, which is what says the rule stops where the
+    # screen does.
+    fixture
+    TUI_COLS=60
+    tui_table_reset
+    tui_table_col mark 1
+    tui_table_col name 20
+    tui_table_col state 6
+    tui_table_col note 1fr min:16 --priority 5
+    local w; _tui_table_solve 60; w="$(tui_table_width note)"
+    _tui_menu_cells 0 0 "" "$w"; tui_table_row "${_TUI_MENU_CELLS[@]}"
+    _tui_menu_cells 1 1 "" "$w"; tui_table_row "${_TUI_MENU_CELLS[@]}"
+    local line
+    line="$(tui_table_render --width 60 | head -1 | sed 's/\x1b\[[0-9;]*m//g')"
+    assert_eq "$(printf '%s' "$line" | wc -m | tr -d ' ')" "60"
+    # And no ellipsis, which is what a cut rule leaves behind.
+    assert_fails grep -q '…' <<< "$line"
+}
