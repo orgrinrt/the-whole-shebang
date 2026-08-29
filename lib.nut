@@ -30,3 +30,23 @@ tui::report              libs/tui/report.sh
 tui::run                 libs/tui/run.sh
 tui::table               libs/tui/table.sh
 tui::term                libs/tui/term.sh
+
+# Getting a named file out of whatever a release published.
+#
+# **Two implementations of one surface, and the gate picks by what the machine
+# has** rather than the code asking at each call and discovering the answer
+# mid-install. `has(bin(...))` is checked when the module is resolved, so a
+# machine with neither gets an unresolvable module and a message naming it,
+# instead of a download quietly copied into place as if it were a binary.
+#
+# libarchive first because it reads everything on its own: tar, gzip, bzip2,
+# xz, zstd, zip, 7z, cpio, ar, iso. It answers to `bsdtar` on Linux and to
+# `tar` on macOS, where /usr/bin/tar is bsdtar, and it is not optional on an
+# Arch-shaped machine since pacman itself depends on the package.
+#
+# The split variant is unzip plus GNU tar, which is the combination with the
+# hole: GNU tar does not read zip. It is the floor, not a peer.
+#[has(bin(bsdtar))]
+unpack                   libs/unpack/libarchive.sh
+#[has(bin(unzip))]
+unpack                   libs/unpack/split.sh
