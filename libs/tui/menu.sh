@@ -75,6 +75,19 @@ declare -gi TUI_MENU_ASIDE_MIN="${TUI_MENU_ASIDE_MIN:-24}"
 declare -gi TUI_MENU_ASIDE_WIDTH="${TUI_MENU_ASIDE_WIDTH:-30}"
 declare -g  TUI_MENU_FILTER=""
 
+# A function to call while nothing is being typed, for a caller with work it
+# would rather not do before the first frame.
+#
+# The list a maintenance tool shows takes seconds to work out: every row asks
+# whether its task is already true, and several of those shell out. Doing all
+# of that up front means a blank terminal for as long as it takes, and the
+# first thing anybody learns about the tool is that it hangs on start.
+#
+# So the rows go up unresolved and this fills them in. It returns 0 while there
+# is more to do, which redraws and calls it again, and non-zero when it has
+# finished, after which the menu goes back to simply waiting for a key.
+declare -g  TUI_MENU_IDLE="${TUI_MENU_IDLE:-}"
+
 # The section a row was declared under, and the kind of thing it is. Both are
 # carried per row so the list can be grouped by either without the caller
 # building it twice.
@@ -139,7 +152,7 @@ tui_menu_heading() {
 # Usage: tui_menu_entry <id> <text> [state] [note] [kind]
 tui_menu_entry() {
     local state="${3:-ok}"
-    case "$state" in ok|done|off) ;; *) state="ok" ;; esac
+    case "$state" in ok|done|off|wait) ;; *) state="ok" ;; esac
     TUI_MENU_ID+=("$1"); TUI_MENU_TEXT+=("$2")
     TUI_MENU_STATE+=("$state"); TUI_MENU_NOTE+=("${4:-}")
     TUI_MENU_SECTION+=("$_TUI_MENU_SECTION_NOW"); TUI_MENU_KIND+=("${5:-}")
@@ -252,7 +265,21 @@ tui_menu_run() {
         if [[ -n "$pending" ]]; then
             act="$pending"; pending=""; filtering=0
         else
-            tui_key_read || break
+            # Work the caller has left, a slice at a time, while nothing is
+            # being typed. A key that is already waiting wins: filling a list
+            # in matters less than answering the person in front of it.
+            if [[ -n "$TUI_MENU_IDLE" ]] && declare -F "$TUI_MENU_IDLE" >/dev/null 2>&1; then
+                if tui_key_read_now; then
+                    :
+                elif "$TUI_MENU_IDLE"; then
+                    continue
+                else
+                    TUI_MENU_IDLE=""
+                    tui_key_read || break
+                fi
+            else
+                tui_key_read || break
+            fi
             # Filtering is a mode, entered with `/`. Type-to-filter without one
             # cannot work here: every letter a person would search for is also
             # a key that already means something, so `chroot` would quit at the

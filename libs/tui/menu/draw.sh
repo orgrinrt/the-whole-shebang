@@ -82,6 +82,10 @@ _tui_menu_cells() {
     local mark="" word="" colour=""
     case "$state" in
         done) word="done"; colour="$TUI_C_OK" ;;
+        # Not yet worked out. A row that says nothing while the answer is
+        # being fetched reads as a row that can be run, and by the time it
+        # turns out it cannot, somebody has already pressed enter on it.
+        wait) word="..";  colour="$TUI_C_MUTE" ;;
         off)  word="off";  colour="$TUI_C_OFF" ;;
         warn) word="warn"; colour="$TUI_C_WARN" ;;
         fail) word="fail"; colour="$TUI_C_BAD" ;;

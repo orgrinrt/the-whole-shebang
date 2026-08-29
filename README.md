@@ -116,6 +116,14 @@ move by section, and so do ctrl and alt with an arrow, since a terminal can swal
 modified arrow and a layout can withhold the bracket. Every key it answers to sits in the
 register above, so all of them can be moved.
 
+A row can also say it does not know yet. Working out whether a task is already true is
+often the slow part, slow enough that doing all of it before the first frame means a blank
+terminal for several seconds and the first thing anybody learns about the tool is that it
+hangs on start. So the rows go up unresolved, and `TUI_MENU_IDLE` names a function the
+menu calls whenever nothing is being typed, which fills them in a slice at a time. A key
+that is already waiting wins over a slice, since answering the person in front of it
+matters more than finishing the list.
+
 Three things arrange it, and they are three different questions. `g` groups by the
 section a row was declared under, by its kind, or not at all, making its own headings
 when the cut is not the declared one. `s` orders by the caller's own order, by name, or

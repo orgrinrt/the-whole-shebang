@@ -1417,3 +1417,134 @@ it_fills_the_row_to_the_edge_and_no_further() {
     # And no ellipsis, which is what a cut rule leaves behind.
     assert_fails grep -q '…' <<< "$line"
 }
+
+# --- filling the list in after it is up --------------------------------------
+
+#[test]
+it_keeps_a_row_that_has_not_been_worked_out_yet() {
+    # The state a row has before anything has asked whether its task is
+    # already true. Dropped, or silently turned into `ok`, and a list that
+    # fills itself in cannot say what it does not know yet.
+    tui_menu_reset
+    tui_menu_entry a "Alpha" wait
+    assert_eq "${TUI_MENU_STATE[0]}" "wait"
+}
+
+#[test]
+it_says_so_on_a_row_it_does_not_know_about_yet() {
+    # A row that says nothing while the answer is being fetched reads as a row
+    # that can be run, and by the time it turns out it cannot, somebody has
+    # pressed enter on it.
+    tui_menu_reset
+    tui_menu_entry a "Alpha" wait
+    tui_menu_refilter
+    _tui_menu_cells 0 0
+    assert_ok grep -q '\.\.' <<< "${_TUI_MENU_CELLS[2]}"
+}
+
+#[test]
+it_lets_the_cursor_land_on_a_row_that_is_still_being_worked_out() {
+    # It will be runnable in a moment. A cursor that skipped it would jump
+    # around under the reader's hand as the answers came in.
+    tui_menu_reset
+    tui_menu_entry a "Alpha" wait
+    tui_menu_entry b "Beta"  ok
+    tui_menu_refilter
+    assert_ok _tui_menu_landable 0
+}
+
+#[test]
+it_does_not_hide_an_unresolved_row_with_the_unavailable_ones() {
+    # `a` hides what cannot be run. A row nobody has asked about yet is not
+    # known to be one of those, and hiding it would make the list shrink and
+    # grow while it filled in.
+    tui_menu_reset
+    tui_menu_entry a "Alpha" wait
+    tui_menu_entry b "Beta"  off
+    TUI_MENU_HIDE_OFF=1
+    tui_menu_refilter
+    assert_eq "${#TUI_MENU_VIEW[@]}" "1"
+    assert_eq "${TUI_MENU_VIEW[0]}" "0"
+    TUI_MENU_HIDE_OFF=0
+}
+
+#[test]
+it_still_refuses_a_state_it_does_not_know() {
+    # The control for the four above: adding one state must not have turned the
+    # check into one that accepts anything.
+    tui_menu_reset
+    tui_menu_entry a "Alpha" pending
+    tui_menu_entry b "Beta"  waiting
+    tui_menu_entry c "Gamma" ""
+    assert_eq "${TUI_MENU_STATE[0]}" "ok"
+    assert_eq "${TUI_MENU_STATE[1]}" "ok"
+    assert_eq "${TUI_MENU_STATE[2]}" "ok"
+}
+
+_idle_ran=0
+_idle_left=3
+_idle_slice() {
+    _idle_ran=$(( _idle_ran + 1 ))
+    _idle_left=$(( _idle_left - 1 ))
+    TUI_MENU_STATE[1]="ok"
+    (( _idle_left > 0 ))
+}
+
+#[test]
+it_does_the_callers_leftover_work_while_nothing_is_typed() {
+    # The rows go up unresolved and this fills them in, rather than the
+    # terminal staying blank for as long as working them out takes.
+    fixture
+    TUI_MENU_STATE[1]="wait"
+    tui_menu_refilter
+    _idle_ran=0; _idle_left=3
+    TUI_MENU_IDLE=_idle_slice
+    tui_menu_run "t" < /dev/null > /dev/null 2>&1
+    assert_eq "$_idle_ran" "3"
+    assert_eq "${TUI_MENU_STATE[1]}" "ok"
+    TUI_MENU_IDLE=""
+}
+
+#[test]
+it_answers_a_key_before_it_does_any_leftover_work() {
+    # Filling a list in matters less than answering the person in front of it,
+    # and a slice that took a moment would swallow the keypress that arrived
+    # during it.
+    fixture
+    _idle_ran=0; _idle_left=99
+    TUI_MENU_IDLE=_idle_slice
+    tui_menu_run "t" < <(printf 'q') > /dev/null 2>&1
+    assert_eq "$_idle_ran" "0"
+    TUI_MENU_IDLE=""
+}
+
+#[test]
+it_stops_asking_once_the_caller_says_it_is_finished() {
+    # Otherwise the loop calls it forever, redrawing every time, which is a
+    # busy wait wearing a feature's clothes.
+    fixture
+    _idle_ran=0; _idle_left=1
+    TUI_MENU_IDLE=_idle_slice
+    tui_menu_run "t" < /dev/null > /dev/null 2>&1
+    assert_eq "$_idle_ran" "1"
+    TUI_MENU_IDLE=""
+}
+
+#[test]
+it_waits_for_a_key_when_there_is_no_leftover_work_at_all() {
+    # The ordinary case, and the control for the three above: a menu with no
+    # callback must not gain a busy loop from one existing.
+    fixture
+    _idle_ran=0
+    TUI_MENU_IDLE=""
+    tui_menu_run "t" < /dev/null > /dev/null 2>&1
+    assert_eq "$_idle_ran" "0"
+}
+
+#[test]
+it_ignores_a_callback_naming_a_function_nobody_defined() {
+    fixture
+    TUI_MENU_IDLE=_no_such_idle_function
+    assert_fails tui_menu_run "t" < /dev/null > /dev/null 2>&1
+    TUI_MENU_IDLE=""
+}
