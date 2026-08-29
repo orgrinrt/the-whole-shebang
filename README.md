@@ -73,7 +73,7 @@ needs a human to look at it.
 
 ## tui
 
-Twelve modules for a terminal interface, taken on their own like everything else here.
+Fifteen modules for a terminal interface, taken on their own like everything else here.
 Written for a bootable maintenance tool, which is what set the constraints.
 
 `tui/term` enters and leaves a full-screen session and puts the terminal back however the
@@ -88,9 +88,41 @@ means rather than for the colour itself.
 `tui/key` names a keypress, so nothing above it ever has to match an escape sequence.
 Arrows, vi keys and the emacs pairs all fold to the same four names.
 
+`tui/action` holds what an interface can do, as data rather than as a `case` over
+characters. An action carries an id, a label, which keys reach it and where it applies,
+so the key line, the help screen and the palette are all reads of one register instead of
+three lists that drift. A binding is named, `bracket-left` and not `[`, which is what
+lets a config file point at it and what makes it rebindable on a layout that cannot
+produce the character: on a Finnish keyboard `[` is AltGr+8 and a bare console does not
+deliver it at all.
+
+`tui/screen` writes only the rows that changed. A whole-screen redraw on every keypress
+is imperceptible under a terminal emulator with a gpu behind it and close to a second on
+a bare console, which is the machine a maintenance tool tends to run on, so a frame is
+built as rows and the flush compares them against the ones already up there. A cursor
+step costs two rows and a filter keystroke costs most of them, and neither case has to be
+recognised for that to come out right.
+
+`tui/palette` is the other way to reach an action, for when a key is a thing you would
+have had to already know. Type a few letters of what you want and pick it off the list,
+and the keys that reach it are printed beside it, which is mostly how anybody finds out
+one exists. It searches the whole register, so an action with no key at all is as
+reachable as any other, and it picks rather than runs: the caller decides what to do with
+what came back.
+
 `tui/menu` is a list with headings the cursor skips over, and a viewport that keeps the
 cursor in view. The cursor is a ring: up from the first row is the last one. `[` and `]`
-move by section, and so does a modifier with an arrow.
+move by section, and so do ctrl and alt with an arrow, since a terminal can swallow the
+modified arrow and a layout can withhold the bracket. Every key it answers to sits in the
+register above, so all of them can be moved.
+
+A row can also say it does not know yet. Working out whether a task is already true is
+often the slow part, slow enough that doing all of it before the first frame means a blank
+terminal for several seconds and the first thing anybody learns about the tool is that it
+hangs on start. So the rows go up unresolved, and `TUI_MENU_IDLE` names a function the
+menu calls whenever nothing is being typed, which fills them in a slice at a time. A key
+that is already waiting wins over a slice, since answering the person in front of it
+matters more than finishing the list.
 
 Three things arrange it, and they are three different questions. `g` groups by the
 section a row was declared under, by its kind, or not at all, making its own headings

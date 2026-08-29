@@ -6,6 +6,7 @@
 
 diagnostics::findings    libs/diagnostics/findings.sh
 verify::digest           libs/verify/digest.sh
+tui::action              libs/tui/action.sh
 tui::confirm             libs/tui/confirm.sh
 tui::frame               libs/tui/frame.sh
 # Reads one keypress at a time from a terminal, with a timeout short enough to
@@ -21,12 +22,15 @@ tui::frame               libs/tui/frame.sh
 tui::key                 libs/tui/key.sh
 tui::layout              libs/tui/layout.sh
 tui::menu                libs/tui/menu.sh
+tui::palette             libs/tui/palette.sh
 tui::menu::draw          libs/tui/menu/draw.sh    internal
+tui::menu::keys          libs/tui/menu/keys.sh    internal
 tui::menu::view          libs/tui/menu/view.sh    internal
 tui::modal               libs/tui/modal.sh
 tui::plan                libs/tui/plan.sh
 tui::progress            libs/tui/progress.sh
 tui::report              libs/tui/report.sh
+tui::screen              libs/tui/screen.sh
 tui::run                 libs/tui/run.sh
 tui::table               libs/tui/table.sh
 tui::term                libs/tui/term.sh
