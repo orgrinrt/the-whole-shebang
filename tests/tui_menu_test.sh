@@ -1757,3 +1757,178 @@ ctrl_c_with_nothing_typed_leaves_the_menu() {
     fixture
     assert_fails tui_menu_run "t" < <(printf '/\003') > /dev/null 2>&1
 }
+
+# --- going backwards ----------------------------------------------------------
+
+#[test]
+the_grouping_cycles_backwards() {
+    # Three states, so forwards twice arrives at the same place. It still
+    # matters: every press rebuilds the view and puts the cursor at the top, so
+    # going the long way round is not free.
+    TUI_MENU_GROUP="section"
+    tui_menu_group_prev; assert_eq "$TUI_MENU_GROUP" "none"
+    tui_menu_group_prev; assert_eq "$TUI_MENU_GROUP" "kind"
+    tui_menu_group_prev; assert_eq "$TUI_MENU_GROUP" "section"
+}
+
+#[test]
+the_ordering_cycles_backwards() {
+    TUI_MENU_SORT="declared"
+    tui_menu_sort_prev; assert_eq "$TUI_MENU_SORT" "state"
+    tui_menu_sort_prev; assert_eq "$TUI_MENU_SORT" "name"
+    tui_menu_sort_prev; assert_eq "$TUI_MENU_SORT" "declared"
+}
+
+#[test]
+backwards_is_the_inverse_of_forwards() {
+    # The property, rather than the two tables above agreeing with each other
+    # by having been typed out twice.
+    local g s
+    for g in section kind none; do
+        TUI_MENU_GROUP="$g"; tui_menu_group_next; tui_menu_group_prev
+        assert_eq "$TUI_MENU_GROUP" "$g"
+    done
+    for s in declared name state; do
+        TUI_MENU_SORT="$s"; tui_menu_sort_next; tui_menu_sort_prev
+        assert_eq "$TUI_MENU_SORT" "$s"
+    done
+}
+
+#[test]
+the_filter_cycles_backwards_through_none() {
+    fixture
+    tui_menu_filter a _pred_true
+    tui_menu_filter b _pred_true
+    tui_menu_filter c _pred_true
+    TUI_MENU_FILTER_ON=""
+    assert_eq "$(_tui_menu_filter_prev)" "c"
+    TUI_MENU_FILTER_ON="c"; assert_eq "$(_tui_menu_filter_prev)" "b"
+    TUI_MENU_FILTER_ON="b"; assert_eq "$(_tui_menu_filter_prev)" "a"
+    TUI_MENU_FILTER_ON="a"; assert_empty "$(_tui_menu_filter_prev)"
+}
+
+#[test]
+the_filter_backwards_is_the_inverse_of_forwards() {
+    fixture
+    tui_menu_filter a _pred_true
+    tui_menu_filter b _pred_true
+    local f
+    for f in "" a b; do
+        TUI_MENU_FILTER_ON="$f"
+        TUI_MENU_FILTER_ON="$(_tui_menu_filter_next)"
+        assert_eq "$(_tui_menu_filter_prev)" "$f"
+    done
+}
+
+#[test]
+the_backwards_keys_are_registered_and_shifted() {
+    # Capitals, so they are the shifted spelling of the key that goes forwards,
+    # which is the thing somebody guesses without being told.
+    tui_menu_bindings
+    assert_eq "$(tui_action_for main 'G')" "menu-group-back"
+    assert_eq "$(tui_action_for main 'S')" "menu-sort-back"
+    assert_eq "$(tui_action_for main 'F')" "menu-filter-back"
+    assert_eq "$(tui_action_for main 'g')" "menu-group"
+    assert_eq "$(tui_action_for main 's')" "menu-sort"
+    assert_eq "$(tui_action_for main 'f')" "menu-filter"
+}
+
+#[test]
+shift_g_actually_walks_the_grouping_the_other_way() {
+    # Through the loop rather than the function, so the dispatch is what is
+    # being tested. Forwards from section is kind; backwards is none.
+    fixture
+    TUI_MENU_GROUP="section"
+    tui_menu_run "t" < <(printf 'Gq') > /dev/null 2>&1
+    assert_eq "$TUI_MENU_GROUP" "none"
+    TUI_MENU_GROUP="section"
+    tui_menu_run "t" < <(printf 'gq') > /dev/null 2>&1
+    assert_eq "$TUI_MENU_GROUP" "kind"
+}
+
+# --- wrapping -----------------------------------------------------------------
+
+#[test]
+it_breaks_text_on_words() {
+    local -a out=()
+    _tui_menu_wrap out "one two three four" 9
+    assert_eq "${out[0]}" "one two"
+    assert_eq "${out[1]}" "three"
+    assert_eq "${out[2]}" "four"
+}
+
+#[test]
+it_cuts_a_word_longer_than_the_column() {
+    # A path or a hash. Shown cut is worth more than not shown, and refusing to
+    # break it would push it off the panel entirely.
+    local -a out=()
+    _tui_menu_wrap out "/a/very/long/path/indeed" 8
+    assert_eq "${out[0]}" "/a/very/"
+    assert_ok test "${#out[@]}" -ge 3
+}
+
+#[test]
+it_wraps_nothing_into_nothing() {
+    local -a out=(stale)
+    _tui_menu_wrap out "" 20
+    assert_eq "${#out[@]}" "0"
+}
+
+#[test]
+a_column_of_no_width_wraps_nothing_rather_than_looping() {
+    # The guard that matters: a zero width with a word longer than it is an
+    # infinite loop, and the panel is zero-width on a narrow terminal.
+    local -a out=(stale)
+    _tui_menu_wrap out "something" 0
+    assert_eq "${#out[@]}" "0"
+}
+
+# --- the panel ----------------------------------------------------------------
+
+#[test]
+the_facts_are_capped_at_the_height_given() {
+    tui_menu_reset
+    local i
+    for i in 1 2 3 4 5 6 7 8; do tui_menu_aside "k$i" "v$i"; done
+    _tui_menu_aside_lines 20 3
+    assert_eq "${#_TUI_MENU_ASIDE_LINES[@]}" "3"
+}
+
+#[test]
+no_cap_leaves_every_fact_on() {
+    # The control: the cap is opt-in, so a caller that does not ask for one
+    # keeps what it had.
+    tui_menu_reset
+    local i
+    for i in 1 2 3 4 5; do tui_menu_aside "k$i" "v$i"; done
+    _tui_menu_aside_lines 20
+    assert_eq "${#_TUI_MENU_ASIDE_LINES[@]}" "5"
+}
+
+#[test]
+a_cap_larger_than_the_facts_truncates_nothing() {
+    tui_menu_reset
+    tui_menu_aside "one" "1"
+    tui_menu_aside "two" "2"
+    _tui_menu_aside_lines 20 9
+    assert_eq "${#_TUI_MENU_ASIDE_LINES[@]}" "2"
+}
+
+#[test]
+every_panel_line_is_exactly_the_width_asked_for() {
+    # They are joined onto the list rows, so a short one lets the row beside it
+    # show through and a long one pushes the screen sideways.
+    tui_menu_reset
+    tui_menu_aside "a label" "v"
+    tui_menu_aside "heading"
+    _tui_menu_aside_lines 24
+    local l plain
+    for l in "${_TUI_MENU_ASIDE_LINES[@]}"; do
+        plain="$(printf '%s' "$l" | sed $'s/\033\\[[0-9;]*m//g')"
+        assert_eq "${#plain}" "24"
+    done
+}
+
+# Always true, for the cycling tests above, which are about the order the
+# filters are visited in rather than about what any of them selects.
+_pred_true() { return 0; }

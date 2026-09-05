@@ -209,6 +209,31 @@ tui_menu_sort_next() {
     esac
 }
 
+#[pub]
+# The same two, backwards.
+#
+# Three states each, so forwards twice arrives at the same place, which is why
+# these did not exist. They matter anyway: the one you want is behind you as
+# often as ahead, and pressing a key twice to go back one is the sort of thing
+# somebody notices every time and stops noticing they are annoyed by.
+# Usage: tui_menu_group_prev
+tui_menu_group_prev() {
+    case "$TUI_MENU_GROUP" in
+        section) TUI_MENU_GROUP="none" ;;
+        none)    TUI_MENU_GROUP="kind" ;;
+        *)       TUI_MENU_GROUP="section" ;;
+    esac
+}
+#[pub]
+# Usage: tui_menu_sort_prev
+tui_menu_sort_prev() {
+    case "$TUI_MENU_SORT" in
+        declared) TUI_MENU_SORT="state" ;;
+        state)    TUI_MENU_SORT="name" ;;
+        *)        TUI_MENU_SORT="declared" ;;
+    esac
+}
+
 # -----------------------------------------------------------------------------
 # Arithmetic, kept pure so it can be tested
 # -----------------------------------------------------------------------------
