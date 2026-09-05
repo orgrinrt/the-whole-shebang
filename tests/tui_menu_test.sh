@@ -1929,6 +1929,50 @@ every_panel_line_is_exactly_the_width_asked_for() {
     done
 }
 
+# --- the wrap, and what it must not do to the text ---------------------------
+
+#[test]
+wrapping_splits_a_description_on_whitespace() {
+    # The positive control for the two below. If this one ever fails, they are
+    # passing because nothing is being split at all rather than because the
+    # splitting is right.
+    local -a out
+    _tui_menu_wrap out "one two three" 40
+    assert_eq "${#out[@]}" "1"
+    assert_eq "${out[0]}" "one two three"
+}
+
+#[test]
+a_description_holding_a_star_survives_the_wrap() {
+    # It is split on whitespace and it is not a glob. Unquoted in a `for`, a
+    # description saying "size *" is replaced by whatever the working directory
+    # holds, so what the panel shows depends on where the program was started.
+    local d="${BASH_SOURCE[0]%/*}/../.wrap-glob-fixture"
+    mkdir -p "$d" && : >"$d/alpha" && : >"$d/beta"
+    local before="$PWD"
+    cd "$d" || return 1
+    local -a out
+    _tui_menu_wrap out "size *" 40
+    cd "$before" || return 1
+    rm -rf "$d"
+    assert_eq "${out[0]}" "size *"
+}
+
+#[test]
+a_description_holding_a_question_mark_survives_the_wrap() {
+    # The other glob character, and the one that reaches a real description
+    # first: a panel row asking a question ends in one.
+    local d="${BASH_SOURCE[0]%/*}/../.wrap-glob-fixture-q"
+    mkdir -p "$d" && : >"$d/ab" && : >"$d/cd"
+    local before="$PWD"
+    cd "$d" || return 1
+    local -a out
+    _tui_menu_wrap out "reboot ??" 40
+    cd "$before" || return 1
+    rm -rf "$d"
+    assert_eq "${out[0]}" "reboot ??"
+}
+
 # Always true, for the cycling tests above, which are about the order the
 # filters are visited in rather than about what any of them selects.
 _pred_true() { return 0; }

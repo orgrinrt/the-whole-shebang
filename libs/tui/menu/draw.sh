@@ -193,7 +193,25 @@ _tui_menu_wrap() {
     local text="$2" width="$3" word line=""
     _out=()
     (( width > 0 )) || return 0
-    for word in $text; do
+
+    # The split on whitespace is wanted and the glob expansion that comes with
+    # it is not. A description is text somebody wrote, so "size *" unquoted in
+    # the loop below expands to whatever the working directory holds, and what
+    # the panel shows then depends on where the program was started. The
+    # star and the question mark both reach a real description: one asks about
+    # space, the other ends a question.
+    #
+    # `set -f` off and on around the one expansion, rather than a rewrite to
+    # `read -ra`, because the default IFS splits on space, tab and newline and
+    # `read` reads one line. The prior setting is restored rather than assumed,
+    # since a caller may have turned globbing off itself.
+    local _globbing_was_on=1
+    [[ $- == *f* ]] && _globbing_was_on=0
+    set -f
+    local -a _words=( $text )
+    (( _globbing_was_on )) && set +f
+
+    for word in "${_words[@]}"; do
         while (( ${#word} > width )); do
             [[ -n "$line" ]] && { _out+=("$line"); line=""; }
             _out+=("${word:0:$width}")

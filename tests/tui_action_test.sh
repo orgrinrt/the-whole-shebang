@@ -532,3 +532,53 @@ it_ignores_a_file_with_no_keys_section() {
     assert_eq "$(tui_action_keys section-prev)" "bracket-left ctrl-up"
     rm -f "$f"
 }
+
+# --- a key list holds names, and that is enforced rather than expected -------
+
+#[test]
+a_key_written_as_its_character_is_stored_as_its_name() {
+    # `tui_action_keys` documents its answer as names, and a caller writing the
+    # character is the ordinary way to disagree with that. Normalised on the
+    # way in, so everything downstream reads names and nothing has to hope.
+    tui_action_reset
+    tui_action_add help main "this" "?"
+    assert_eq "$(tui_action_keys help)" "question"
+}
+
+#[test]
+a_name_written_as_a_name_is_left_alone() {
+    # The positive control for the test above and the two below: if the
+    # normalising rewrote names as well, they would all pass for the wrong
+    # reason and every existing binding in the fixture would have moved.
+    tui_action_reset
+    tui_action_add section-next main "on" "bracket-right ctrl-down"
+    assert_eq "$(tui_action_keys section-next)" "bracket-right ctrl-down"
+}
+
+#[test]
+a_glob_character_in_a_key_list_does_not_reach_the_filesystem() {
+    # Four readers split a key list unquoted, so a raw `*` sitting in one is
+    # replaced by whatever the working directory holds and the action answers
+    # to filenames. The list holding names is what stops that, and the test
+    # runs where there is something to expand into.
+    local d="${BASH_SOURCE[0]%/*}/../.action-glob-fixture"
+    mkdir -p "$d" && : >"$d/alpha" && : >"$d/beta"
+    local before="$PWD"
+    cd "$d" || return 1
+    tui_action_reset
+    tui_action_add pick main "pick" "*"
+    local got; got="$(tui_action_keys pick)"
+    cd "$before" || return 1
+    rm -rf "$d"
+    assert_eq "$got" "star"
+}
+
+#[test]
+a_rebind_normalises_what_an_add_normalises() {
+    # `tui_action_bind` is the second door into the same array, and a keymap
+    # file goes through it. A guard on one door is not a guard.
+    tui_action_reset
+    tui_action_add help main "this" "question"
+    tui_action_bind help "/ ?"
+    assert_eq "$(tui_action_keys help)" "slash question"
+}
