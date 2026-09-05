@@ -198,6 +198,28 @@ _tui_menu_filter_next() {
     printf ''
 }
 
+# The one before it, wrapping through none the other way.
+#
+# With four filters registered, reaching the one behind you costs three presses
+# forwards, each of which rebuilds the list and moves the cursor to the top.
+_tui_menu_filter_prev() {
+    local n="${#TUI_MENU_FILTERS[@]}" i name
+    (( n > 0 )) || { printf ''; return 0; }
+    if [[ -z "$TUI_MENU_FILTER_ON" ]]; then
+        printf '%s' "${TUI_MENU_FILTERS[$((n-1))]%%$'\t'*}"
+        return 0
+    fi
+    for (( i = 0; i < n; i++ )); do
+        name="${TUI_MENU_FILTERS[$i]%%$'\t'*}"
+        if [[ "$name" == "$TUI_MENU_FILTER_ON" ]]; then
+            (( i > 0 )) && { printf '%s' "${TUI_MENU_FILTERS[$((i-1))]%%$'\t'*}"; return 0; }
+            printf ''
+            return 0
+        fi
+    done
+    printf ''
+}
+
 # Does the row pass the filter that is on? No filter keeps everything.
 _tui_menu_passes_filter() {
     local i="$1" entry name fn
@@ -300,19 +322,28 @@ tui_menu_run() {
                     # The help screen writes over everything, and the buffer
                     # cannot know that happened.
                     _tui_menu_help "$title"; tui_screen_invalidate; continue ;;
-                menu-group)
-                    tui_menu_group_next
+                menu-group|menu-group-back)
+                    if [[ "$act" == menu-group-back ]]; then tui_menu_group_prev
+                    else tui_menu_group_next; fi
+                    tui_menu_refilter
+                    cursor="$(_tui_menu_first)"; top=0; continue ;;
+                menu-sort-back)
+                    tui_menu_sort_prev
                     tui_menu_refilter
                     cursor="$(_tui_menu_first)"; top=0; continue ;;
                 menu-sort)
                     tui_menu_sort_next
                     tui_menu_refilter
                     cursor="$(_tui_menu_first)"; top=0; continue ;;
-                menu-filter)
+                menu-filter|menu-filter-back)
                     # A filter is a question about the row, and the search is
                     # text somebody typed. Two keys, because they are two
                     # things.
-                    tui_menu_filter_on "$(_tui_menu_filter_next)"
+                    if [[ "$act" == menu-filter-back ]]; then
+                        tui_menu_filter_on "$(_tui_menu_filter_prev)"
+                    else
+                        tui_menu_filter_on "$(_tui_menu_filter_next)"
+                    fi
                     tui_menu_refilter
                     cursor="$(_tui_menu_first)"
                     # Filtered down to nothing is a blank screen with no way
