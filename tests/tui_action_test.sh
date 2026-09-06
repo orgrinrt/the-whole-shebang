@@ -561,8 +561,14 @@ a_glob_character_in_a_key_list_does_not_reach_the_filesystem() {
     # replaced by whatever the working directory holds and the action answers
     # to filenames. The list holding names is what stops that, and the test
     # runs where there is something to expand into.
-    local d="${BASH_SOURCE[0]%/*}/../.action-glob-fixture"
-    mkdir -p "$d" && : >"$d/alpha" && : >"$d/beta"
+    #
+    # Under `mktemp -d` rather than in the repository. A fixture at the root is
+    # untracked while it exists, so `git status` is noisy for as long as the
+    # run takes and stays noisy for good if the test aborts before its `rm`,
+    # and the thing left behind is a directory named for a test nobody is
+    # looking at any more.
+    local d; d="$(mktemp -d "${TMPDIR:-/tmp}/tws-glob.XXXXXX")"
+    : >"$d/alpha"; : >"$d/beta"
     local before="$PWD"
     cd "$d" || return 1
     tui_action_reset

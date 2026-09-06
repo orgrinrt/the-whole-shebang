@@ -1947,8 +1947,12 @@ a_description_holding_a_star_survives_the_wrap() {
     # It is split on whitespace and it is not a glob. Unquoted in a `for`, a
     # description saying "size *" is replaced by whatever the working directory
     # holds, so what the panel shows depends on where the program was started.
-    local d="${BASH_SOURCE[0]%/*}/../.wrap-glob-fixture"
-    mkdir -p "$d" && : >"$d/alpha" && : >"$d/beta"
+    #
+    # Under `mktemp -d` rather than in the repository: a fixture at the root is
+    # untracked while it exists and stays there for good if the test aborts
+    # before its `rm`.
+    local d; d="$(mktemp -d "${TMPDIR:-/tmp}/tws-wrap.XXXXXX")"
+    : >"$d/alpha"; : >"$d/beta"
     local before="$PWD"
     cd "$d" || return 1
     local -a out
@@ -1962,8 +1966,8 @@ a_description_holding_a_star_survives_the_wrap() {
 a_description_holding_a_question_mark_survives_the_wrap() {
     # The other glob character, and the one that reaches a real description
     # first: a panel row asking a question ends in one.
-    local d="${BASH_SOURCE[0]%/*}/../.wrap-glob-fixture-q"
-    mkdir -p "$d" && : >"$d/ab" && : >"$d/cd"
+    local d; d="$(mktemp -d "${TMPDIR:-/tmp}/tws-wrap.XXXXXX")"
+    : >"$d/ab"; : >"$d/cd"
     local before="$PWD"
     cd "$d" || return 1
     local -a out
