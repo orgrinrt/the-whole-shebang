@@ -258,7 +258,7 @@ it_drops_a_heading_whose_entries_all_vanish() {
     TUI_MENU_TEXT=(Disk Alpha Beta Gamma Boot Delta Epsilon)
     TUI_MENU_FILTER="alpha"; tui_menu_refilter
     local i seen_boot=0
-    for i in "${TUI_MENU_VIEW[@]}"; do [[ "$i" == "4" ]] && seen_boot=1; done
+    for i in ${TUI_MENU_VIEW[@]+"${TUI_MENU_VIEW[@]}"}; do [[ "$i" == "4" ]] && seen_boot=1; done
     assert_eq "$seen_boot" "0"
 }
 
@@ -1923,7 +1923,7 @@ every_panel_line_is_exactly_the_width_asked_for() {
     tui_menu_aside "heading"
     _tui_menu_aside_lines 24
     local l plain
-    for l in "${_TUI_MENU_ASIDE_LINES[@]}"; do
+    for l in ${_TUI_MENU_ASIDE_LINES[@]+"${_TUI_MENU_ASIDE_LINES[@]}"}; do
         plain="$(printf '%s' "$l" | sed $'s/\033\\[[0-9;]*m//g')"
         assert_eq "${#plain}" "24"
     done

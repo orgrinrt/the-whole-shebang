@@ -230,7 +230,7 @@ _tui_action_key_names() {
     (( _globbing_was_on )) && set +f
 
     local k out=""
-    for k in "${_raw[@]}"; do
+    for k in ${_raw[@]+"${_raw[@]}"}; do
         out="${out:+$out }$(_tui_action_name_of "$k")"
     done
     printf '%s' "$out"

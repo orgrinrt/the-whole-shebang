@@ -211,7 +211,7 @@ _tui_menu_wrap() {
     local -a _words=( $text )
     (( _globbing_was_on )) && set +f
 
-    for word in "${_words[@]}"; do
+    for word in ${_words[@]+"${_words[@]}"}; do
         while (( ${#word} > width )); do
             [[ -n "$line" ]] && { _out+=("$line"); line=""; }
             _out+=("${word:0:$width}")
