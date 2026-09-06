@@ -303,6 +303,30 @@ _tui_menu_help() {
 # anything else that wrote to the terminal behind its back, and it starts over.
 declare -g _TUI_MENU_GEOM=""
 
+# Where the list starts, where it stops, and how many rows that leaves it. Row
+# one is the title and row two is its blank; the bottom keeps two, how the list
+# is arranged and the keys, with one clear row above them so the list does not
+# run into the chrome.
+#
+# One place for all three, because the window arithmetic in `tui_menu_run` and
+# the placement loop in the render are the same budget counted twice, and they
+# went out of step the last time the bottom changed: the description moved into
+# the panel and freed three rows that nobody gave to the list, so a 24-row
+# terminal showed sixteen of thirty entries with five blank rows under them.
+# Worse than the blanks, the two disagreed by two even before that, so a cursor
+# on either of the last two rows of its own window was built and then clipped,
+# and moving onto it made the selection vanish.
+declare -gi _TUI_MENU_ROW_FIRST=3
+declare -gi _TUI_MENU_ROW_LAST=0
+declare -gi _TUI_MENU_BODY=0
+
+_tui_menu_rows() {
+    _TUI_MENU_ROW_LAST=$(( ${TUI_ROWS:-24} - 3 ))
+    _TUI_MENU_BODY=$(( _TUI_MENU_ROW_LAST - _TUI_MENU_ROW_FIRST + 1 ))
+    (( _TUI_MENU_BODY < 1 )) && _TUI_MENU_BODY=1
+    return 0
+}
+
 _tui_menu_render() {
     local cursor="$1" top="$2" height="$3" title="$4"
     local n i row raw line
@@ -324,7 +348,8 @@ _tui_menu_render() {
     local list_cols="${TUI_COLS:-80}"
     (( aside_w > 0 )) && list_cols=$(( list_cols - aside_w - 2 ))
     # Half the column at most, so the description under it has somewhere to go.
-    local aside_cap=$(( (TUI_ROWS - 8) / 2 ))
+    _tui_menu_rows
+    local aside_cap=$(( _TUI_MENU_BODY / 2 ))
     (( aside_cap < 1 )) && aside_cap=1
     _tui_menu_aside_lines "$aside_w" "$aside_cap"
 
@@ -414,10 +439,9 @@ _tui_menu_render() {
     local aside_n="${#_TUI_MENU_ASIDE_LINES[@]}"
     local span="$body"
     (( aside_n > span )) && span="$aside_n"
-    local last=$(( TUI_ROWS - 6 ))
     for (( i = 0; i < span; i++ )); do
-        row=$(( 3 + i ))
-        (( row > last )) && break
+        row=$(( _TUI_MENU_ROW_FIRST + i ))
+        (( row > _TUI_MENU_ROW_LAST )) && break
         line="${rows[$i]-}"
         if (( aside_w > 0 && i < aside_n )); then
             # The table pads its cells, so a list line is already exactly the

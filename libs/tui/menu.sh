@@ -275,8 +275,10 @@ tui_menu_run() {
     tui_raw_on
     while true; do
         tui_size
-        height=$(( TUI_ROWS - 6 ))
-        (( height < 1 )) && height=1
+        # The list's own row budget, from the render, so the window this
+        # scrolls and the rows it actually draws are the same number.
+        _tui_menu_rows
+        height=$_TUI_MENU_BODY
         top="$(_tui_menu_window "$cursor" "$height" "$top")"
         _TUI_MENU_FILTERING=$filtering
         _tui_menu_render "$cursor" "$top" "$height" "$title"

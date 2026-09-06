@@ -1121,6 +1121,105 @@ it_draws_a_heading_across_the_row_rather_than_in_a_column() {
     assert_contains "$out" "disk"
 }
 
+# --- the rows the list is given ----------------------------------------------
+#
+# The arithmetic was in two files, one deciding how far the list scrolls and one
+# deciding how far it draws, and nothing held them together. They disagreed by
+# two before the description moved into the panel and by five after it, and
+# neither disagreement shows up anywhere except on a screen nobody was
+# rendering in a test.
+
+# A menu with more entries than any terminal will hold, rendered at a given
+# height, with the screen buffer left in place to be read row by row.
+_menu_filled() {
+    local rows="${1:-24}" i
+    tui_menu_reset
+    TUI_MENU_GROUP=section; TUI_MENU_SORT=declared
+    TUI_MENU_FILTERS=(); TUI_MENU_FILTER_ON=""; TUI_MENU_FILTER=""
+    for (( i = 0; i < 30; i++ )); do
+        tui_menu_entry "e$i" "Entry number $i" ok "" check
+    done
+    tui_menu_refilter
+    TUI_ROWS="$rows"; TUI_COLS=96
+    _tui_menu_rows
+    _tui_menu_render 0 0 "$_TUI_MENU_BODY" "t" >/dev/null 2>&1
+}
+
+# The last row the render actually put a list entry on.
+_menu_last_drawn_row() {
+    local r last=0
+    for (( r = 1; r <= TUI_ROWS; r++ )); do
+        [[ "${_TUI_SCREEN_NEW[$r]-}" == *"Entry number"* ]] && last="$r"
+    done
+    printf '%s' "$last"
+}
+
+#[test]
+it_draws_the_list_down_to_the_row_the_budget_names() {
+    # The one assertion that would have caught the three rows the description
+    # gave up: it moved into the panel, the bottom went from five chrome rows to
+    # two, and the list kept the budget it had before.
+    local saved="$TUI_ROWS" savedc="$TUI_COLS"
+    _menu_filled 24
+    assert_eq "$_TUI_MENU_ROW_LAST" "21"
+    assert_eq "$(_menu_last_drawn_row)" "21"
+    # One clear row above the two the bottom keeps, and the keys on the last.
+    assert_eq "${_TUI_SCREEN_NEW[22]-}" ""
+    assert_contains "${_TUI_SCREEN_NEW[24]-}" "move"
+    TUI_ROWS="$saved"; TUI_COLS="$savedc"
+}
+
+#[test]
+it_draws_every_row_of_the_window_it_was_given() {
+    # A window wider than the rows that get drawn means a cursor on one of the
+    # rows past the bottom is built and then clipped, so moving onto it makes
+    # the selection disappear and the list does not scroll to bring it back.
+    local saved="$TUI_ROWS" savedc="$TUI_COLS"
+    _menu_filled 24
+    local drawn=0 r
+    for (( r = 1; r <= TUI_ROWS; r++ )); do
+        [[ "${_TUI_SCREEN_NEW[$r]-}" == *"Entry number"* ]] && drawn=$(( drawn + 1 ))
+    done
+    assert_eq "$drawn" "$_TUI_MENU_BODY"
+    TUI_ROWS="$saved"; TUI_COLS="$savedc"
+}
+
+#[test]
+it_scrolls_by_the_budget_rather_than_by_a_second_copy_of_it() {
+    # The run loop decides how far the list scrolls and the render decides how
+    # far it draws, in two files, and the disagreement is invisible from either
+    # side. So the loop is required to take the number rather than spell it: a
+    # second `TUI_ROWS` arithmetic in `menu.sh` is the defect itself, whatever
+    # it happens to evaluate to today.
+    local root="${BASH_SOURCE[0]%/*}/.."
+    assert_ok    grep -q 'height=\$_TUI_MENU_BODY' "$root/libs/tui/menu.sh"
+    assert_fails grep -qE 'height=\$\(\(.*TUI_ROWS' "$root/libs/tui/menu.sh"
+}
+
+#[test]
+it_still_shows_a_list_on_a_terminal_of_eight_rows() {
+    # Both sides drew nothing at all here, because the last row the placement
+    # loop allowed came out above the first row it started at.
+    local saved="$TUI_ROWS" savedc="$TUI_COLS"
+    _menu_filled 8
+    assert_eq "$_TUI_MENU_BODY" "3"
+    assert_contains "${_TUI_SCREEN_NEW[3]-}" "Entry number 0"
+    assert_eq "$(_menu_last_drawn_row)" "5"
+    TUI_ROWS="$saved"; TUI_COLS="$savedc"
+}
+
+#[test]
+it_gives_the_panel_half_the_rows_the_list_has() {
+    # The cap was spelled against the old budget, so the fixed half of the panel
+    # would have kept its old size while the column under it grew.
+    local saved="$TUI_ROWS"
+    TUI_ROWS=24; _tui_menu_rows
+    assert_eq "$(( _TUI_MENU_BODY / 2 ))" "9"
+    TUI_ROWS=40; _tui_menu_rows
+    assert_eq "$(( _TUI_MENU_BODY / 2 ))" "17"
+    TUI_ROWS="$saved"
+}
+
 #[test]
 it_keeps_the_groups_in_the_same_order_whatever_the_sort() {
     # Sorting orders rows inside a group. Sections that rearrange when the
