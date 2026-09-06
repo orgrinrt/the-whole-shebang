@@ -189,7 +189,8 @@ _tui_action_index() {
 # then have to notice.
 # Usage: tui_action_add <id> <scope> <label> [keys] [handler]
 tui_action_add() {
-    local id="${1:-}" scope="${2:-}" label="${3:-}" keys="${4:-}" handler="${5:-}" i
+    local id="${1:-}" scope="${2:-}" label="${3:-}" handler="${5:-}" i
+    local keys; keys="$(_tui_action_key_names "${4:-}")"
     [[ -n "$id" ]] || { printf 'tui_action_add: an action needs an id\n' >&2; return 1; }
     case "$scope" in
         main|filter|palette) ;;
@@ -208,6 +209,33 @@ tui_action_add() {
     TUI_ACTION_GEN=$(( TUI_ACTION_GEN + 1 ))
 }
 
+# A key list as names, whatever the caller wrote it as.
+#
+# `tui_action_keys` says its answer is names and nothing made that true. A
+# caller may write "?" where the table says `question`, and four readers split
+# a key list unquoted, so a raw glob character in one expands to whatever the
+# working directory holds and the action answers to filenames. Normalising
+# at the two doors into the array is what makes the documented claim hold;
+# guarding the four readers would defend against a state that should not exist.
+#
+# The split here is the one place globbing has to be off, and `$-` is read and
+# put back rather than assumed, since a caller may have turned it off already.
+# A name reaching this falls through `_tui_action_name_of`'s default arm
+# unchanged, so it is idempotent and a keymap can be applied twice.
+_tui_action_key_names() {
+    local _globbing_was_on=1
+    [[ $- == *f* ]] && _globbing_was_on=0
+    set -f
+    local -a _raw=( ${1:-} )
+    (( _globbing_was_on )) && set +f
+
+    local k out=""
+    for k in ${_raw[@]+"${_raw[@]}"}; do
+        out="${out:+$out }$(_tui_action_name_of "$k")"
+    done
+    printf '%s' "$out"
+}
+
 #[pub]
 # Point an action at different keys, replacing whatever it had. This is what a
 # keymap does, and it is deliberately not additive: a keymap that could only
@@ -218,7 +246,7 @@ tui_action_bind() {
     local id="${1:-}" i
     i="$(_tui_action_index "$id")" || {
         printf 'tui_action_bind: no action called %s\n' "${id:-empty}" >&2; return 1; }
-    TUI_ACTION_KEYS[$i]="${2:-}"
+    TUI_ACTION_KEYS[$i]="$(_tui_action_key_names "${2:-}")"
     TUI_ACTION_GEN=$(( TUI_ACTION_GEN + 1 ))
 }
 

@@ -147,7 +147,7 @@ _tui_menu_aside_width() {
 declare -ga _TUI_MENU_ASIDE_LINES=()
 
 _tui_menu_aside_lines() {
-    local width="$1"
+    local width="$1" cap="${2:-0}"
     _TUI_MENU_ASIDE_LINES=()
     (( width > 0 )) || return 0
 
@@ -173,6 +173,56 @@ _tui_menu_aside_lines() {
         printf -v pad '%*s' "$gap" ''
         _TUI_MENU_ASIDE_LINES+=("${TUI_C_MUTE}${shown}${TUI_C_END}${pad}${v}")
     done
+
+    # Half the column, at most, when a cap is given. What the panel says about
+    # the machine does not change while somebody reads the list, and what it
+    # says about the row under the cursor changes every time they move, so
+    # letting the fixed half fill the column leaves the moving half nowhere to
+    # go. Truncated silently on purpose: a row saying "and 6 more" would cost
+    # one of the six.
+    if (( cap > 0 && ${#_TUI_MENU_ASIDE_LINES[@]} > cap )); then
+        _TUI_MENU_ASIDE_LINES=("${_TUI_MENU_ASIDE_LINES[@]:0:$cap}")
+    fi
+}
+
+# Text broken to a width, as lines, into the array named by $1. Words are kept
+# whole where they fit and cut where one is longer than the column, which is a
+# path or a hash and is better shown truncated than not at all.
+_tui_menu_wrap() {
+    local -n _out="$1"
+    local text="$2" width="$3" word line=""
+    _out=()
+    (( width > 0 )) || return 0
+
+    # The split on whitespace is wanted and the glob expansion that comes with
+    # it is not. A description is text somebody wrote, so "size *" unquoted in
+    # the loop below expands to whatever the working directory holds, and what
+    # the panel shows then depends on where the program was started. The
+    # star and the question mark both reach a real description: one asks about
+    # space, the other ends a question.
+    #
+    # `set -f` off and on around the one expansion, rather than a rewrite to
+    # `read -ra`, because the default IFS splits on space, tab and newline and
+    # `read` reads one line. The prior setting is restored rather than assumed,
+    # since a caller may have turned globbing off itself.
+    local _globbing_was_on=1
+    [[ $- == *f* ]] && _globbing_was_on=0
+    set -f
+    local -a _words=( $text )
+    (( _globbing_was_on )) && set +f
+
+    for word in ${_words[@]+"${_words[@]}"}; do
+        while (( ${#word} > width )); do
+            [[ -n "$line" ]] && { _out+=("$line"); line=""; }
+            _out+=("${word:0:$width}")
+            word="${word:$width}"
+        done
+        if [[ -z "$line" ]]; then line="$word"
+        elif (( ${#line} + 1 + ${#word} <= width )); then line="${line} ${word}"
+        else _out+=("$line"); line="$word"; fi
+    done
+    [[ -n "$line" ]] && _out+=("$line")
+    return 0
 }
 
 #[pub]
@@ -253,6 +303,30 @@ _tui_menu_help() {
 # anything else that wrote to the terminal behind its back, and it starts over.
 declare -g _TUI_MENU_GEOM=""
 
+# Where the list starts, where it stops, and how many rows that leaves it. Row
+# one is the title and row two is its blank; the bottom keeps two, how the list
+# is arranged and the keys, with one clear row above them so the list does not
+# run into the chrome.
+#
+# One place for all three, because the window arithmetic in `tui_menu_run` and
+# the placement loop in the render are the same budget counted twice, and they
+# went out of step the last time the bottom changed: the description moved into
+# the panel and freed three rows that nobody gave to the list, so a 24-row
+# terminal showed sixteen of thirty entries with five blank rows under them.
+# Worse than the blanks, the two disagreed by two even before that, so a cursor
+# on either of the last two rows of its own window was built and then clipped,
+# and moving onto it made the selection vanish.
+declare -gi _TUI_MENU_ROW_FIRST=3
+declare -gi _TUI_MENU_ROW_LAST=0
+declare -gi _TUI_MENU_BODY=0
+
+_tui_menu_rows() {
+    _TUI_MENU_ROW_LAST=$(( ${TUI_ROWS:-24} - 3 ))
+    _TUI_MENU_BODY=$(( _TUI_MENU_ROW_LAST - _TUI_MENU_ROW_FIRST + 1 ))
+    (( _TUI_MENU_BODY < 1 )) && _TUI_MENU_BODY=1
+    return 0
+}
+
 _tui_menu_render() {
     local cursor="$1" top="$2" height="$3" title="$4"
     local n i row raw line
@@ -273,7 +347,11 @@ _tui_menu_render() {
     local aside_w; aside_w="$(_tui_menu_aside_width)"
     local list_cols="${TUI_COLS:-80}"
     (( aside_w > 0 )) && list_cols=$(( list_cols - aside_w - 2 ))
-    _tui_menu_aside_lines "$aside_w"
+    # Half the column at most, so the description under it has somewhere to go.
+    _tui_menu_rows
+    local aside_cap=$(( _TUI_MENU_BODY / 2 ))
+    (( aside_cap < 1 )) && aside_cap=1
+    _tui_menu_aside_lines "$aside_w" "$aside_cap"
 
     if (( n == 0 )); then
         tui_screen_put 3 "${TUI_C_WARN}nothing matches \"${TUI_MENU_FILTER}\"${TUI_C_END}"
@@ -327,13 +405,43 @@ _tui_menu_render() {
     # is written whole or the two erase each other.
     local body=$(( n - top ))
     (( body < 0 )) && body=0
+    # The row under the cursor, described in the panel below the facts rather
+    # than along the bottom of the screen. At the bottom it was three lines
+    # under a rule that a tall window puts a long way from what they describe,
+    # and a description nobody's eye reaches is a description nobody wrote.
+    raw="${TUI_MENU_VIEW[$cursor]:-$cursor}"
+    local cur_note="" cur_what=""
+    if (( raw >= 0 )); then
+        cur_note="${TUI_MENU_NOTE[$raw]:-}"
+        cur_what="${TUI_MENU_TEXT[$raw]:-}"
+    fi
+    if (( aside_w > 0 )) && [[ -n "$cur_note$cur_what" ]]; then
+        local -a wrapped=()
+        local w blank
+        printf -v blank '%*s' "$aside_w" ''
+        (( ${#_TUI_MENU_ASIDE_LINES[@]} > 0 )) && _TUI_MENU_ASIDE_LINES+=("$blank")
+        if [[ -n "$cur_what" ]]; then
+            _tui_menu_wrap wrapped "$cur_what" "$aside_w"
+            for w in ${wrapped[@]+"${wrapped[@]}"}; do
+                printf -v blank '%*s' $(( aside_w - ${#w} )) ''
+                _TUI_MENU_ASIDE_LINES+=("${TUI_C_HEAD}${w}${TUI_C_END}${blank}")
+            done
+        fi
+        if [[ -n "$cur_note" ]]; then
+            _tui_menu_wrap wrapped "$cur_note" "$aside_w"
+            for w in ${wrapped[@]+"${wrapped[@]}"}; do
+                printf -v blank '%*s' $(( aside_w - ${#w} )) ''
+                _TUI_MENU_ASIDE_LINES+=("${w}${blank}")
+            done
+        fi
+    fi
+
     local aside_n="${#_TUI_MENU_ASIDE_LINES[@]}"
     local span="$body"
     (( aside_n > span )) && span="$aside_n"
-    local last=$(( TUI_ROWS - 6 ))
     for (( i = 0; i < span; i++ )); do
-        row=$(( 3 + i ))
-        (( row > last )) && break
+        row=$(( _TUI_MENU_ROW_FIRST + i ))
+        (( row > _TUI_MENU_ROW_LAST )) && break
         line="${rows[$i]-}"
         if (( aside_w > 0 && i < aside_n )); then
             # The table pads its cells, so a list line is already exactly the
@@ -350,44 +458,31 @@ _tui_menu_render() {
     # the label's own emphasis rather than dimmed into the background: dimmed
     # text at the bottom of a tall window is text nobody notices is there, and
     # a description nobody reads is a description nobody wrote.
-    raw="${TUI_MENU_VIEW[$cursor]:-$cursor}"
-    local note="" what=""
-    if (( raw >= 0 )); then
-        note="${TUI_MENU_NOTE[$raw]:-}"
-        what="${TUI_MENU_TEXT[$raw]:-}"
-    fi
-    if [[ -n "$note" || -n "$what" ]]; then
-        local rule
-        printf -v rule '%*s' $(( ${TUI_COLS:-80} > 2 ? ${TUI_COLS:-80} - 1 : 1 )) ''
-        tui_screen_put $(( TUI_ROWS - 4 )) \
-            "${TUI_C_MUTE}${rule// /$(_tui_menu_rule_char)}${TUI_C_END}"
-        tui_screen_put $(( TUI_ROWS - 3 )) "${TUI_C_HEAD}${what}${TUI_C_END}"
-        tui_screen_put $(( TUI_ROWS - 2 )) "$note"
-    fi
-
-    # The filter is shown while it has content, because a list that is quietly
-    # hiding rows and does not say so reads as a list with rows missing.
-    if [[ -n "$TUI_MENU_FILTER" ]]; then
-        tui_screen_put $(( TUI_ROWS - 1 )) \
-            "${TUI_C_KEY}filter:${TUI_C_END} ${TUI_C_HEAD}${TUI_MENU_FILTER}${TUI_C_END}"
-    fi
+    # The description is in the panel now, beside the row it belongs to, so the
+    # three lines that used to sit down here are gone and the bottom is two
+    # lines: how the list is arranged, and the keys.
+    #
+    # How it is arranged used to be tacked onto the end of the key line, where
+    # it was the least prominent thing on screen while being the one that
+    # explains why the list looks the way it does.
+    local how=""
+    [[ "$TUI_MENU_GROUP" != "section"  ]] && how="${how}${how:+   }${TUI_C_KEY}by${TUI_C_END} ${TUI_MENU_GROUP}"
+    [[ "$TUI_MENU_SORT"  != "declared" ]] && how="${how}${how:+   }${TUI_C_KEY}order${TUI_C_END} ${TUI_MENU_SORT}"
+    [[ -n "$TUI_MENU_FILTER_ON" ]]        && how="${how}${how:+   }${TUI_C_KEY}only${TUI_C_END} ${TUI_MENU_FILTER_ON}"
+    (( TUI_MENU_HIDE_OFF == 1 ))          && how="${how}${how:+   }${TUI_C_KEY}hiding${TUI_C_END} what cannot run"
+    # A search phrase is the same kind of fact about the list and belongs on the
+    # same line, rather than on one of its own that only sometimes exists.
+    [[ -n "$TUI_MENU_FILTER" ]] && how="${how}${how:+   }${TUI_C_KEY}search${TUI_C_END} ${TUI_C_HEAD}${TUI_MENU_FILTER}${TUI_C_END}"
+    [[ -n "$how" ]] && tui_screen_put $(( TUI_ROWS - 1 )) "${TUI_C_MUTE}${how}${TUI_C_END}"
 
     if (( ${_TUI_MENU_FILTERING:-0} == 1 )); then
         tui_screen_put "$TUI_ROWS" \
             "${TUI_C_MUTE}typing to narrow   backspace   esc clears   enter choose${TUI_C_END}"
     else
-        # What is on, when it is not the default, because a list arranged some
-        # other way and not saying so reads as a list in a strange order.
-        local how=""
-        [[ "$TUI_MENU_GROUP" != "section" ]] && how="${how}  by ${TUI_MENU_GROUP}"
-        [[ "$TUI_MENU_SORT"  != "declared" ]] && how="${how}  ${TUI_MENU_SORT} order"
-        [[ -n "$TUI_MENU_FILTER_ON" ]]        && how="${how}  ${TUI_MENU_FILTER_ON} only"
+        # Keys, and nothing else. What the list is doing went to the line above.
         # Cheap: it returns on the first line unless the register moved.
         declare -F _tui_menu_hint >/dev/null 2>&1 && _tui_menu_hint
-        local hint="${_TUI_MENU_HINT:-}"
-        [[ -n "$how" ]] && hint="${hint}${how}"
-        (( TUI_MENU_HIDE_OFF == 1 )) && hint="${hint}   ${TUI_C_KEY}a${TUI_C_END}${TUI_C_MUTE} hiding what cannot run"
-        tui_screen_put "$TUI_ROWS" "${TUI_C_MUTE}${hint}${TUI_C_END}"
+        tui_screen_put "$TUI_ROWS" "${TUI_C_MUTE}${_TUI_MENU_HINT:-}${TUI_C_END}"
     fi
 
     tui_screen_flush

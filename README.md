@@ -130,7 +130,15 @@ when the cut is not the declared one. `s` orders by the caller's own order, by n
 by state with what can be run at the top, inside a group and never across it, so the
 sections do not move around when the ordering does. `f` cycles the filters a caller
 registered, which are predicates over a row rather than text: "the ones I can run" is not
-a word that appears in any row.
+a word that appears in any row. Each of the three has three or four states, so the shifted
+key steps back through them: forwards gets to the one you wanted eventually and takes the
+whole list with it on every press, since each step rebuilds the view and puts the cursor
+back at the top.
+
+What the row under the cursor is for goes in the panel beside it, under the facts, rather
+than on a rule at the bottom of the terminal. A tall window puts that rule a long way from
+the thing it describes, and a description nobody's eye reaches is a description nobody
+wrote. It takes half the panel's column at most, so the facts above it keep their room.
 
 `/` searches, over the notes and the ids as well as the titles, which is the other half
 of that same distinction. It is a mode rather than type-to-filter because every letter

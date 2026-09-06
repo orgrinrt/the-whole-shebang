@@ -258,7 +258,7 @@ it_drops_a_heading_whose_entries_all_vanish() {
     TUI_MENU_TEXT=(Disk Alpha Beta Gamma Boot Delta Epsilon)
     TUI_MENU_FILTER="alpha"; tui_menu_refilter
     local i seen_boot=0
-    for i in "${TUI_MENU_VIEW[@]}"; do [[ "$i" == "4" ]] && seen_boot=1; done
+    for i in ${TUI_MENU_VIEW[@]+"${TUI_MENU_VIEW[@]}"}; do [[ "$i" == "4" ]] && seen_boot=1; done
     assert_eq "$seen_boot" "0"
 }
 
@@ -1121,6 +1121,105 @@ it_draws_a_heading_across_the_row_rather_than_in_a_column() {
     assert_contains "$out" "disk"
 }
 
+# --- the rows the list is given ----------------------------------------------
+#
+# The arithmetic was in two files, one deciding how far the list scrolls and one
+# deciding how far it draws, and nothing held them together. They disagreed by
+# two before the description moved into the panel and by five after it, and
+# neither disagreement shows up anywhere except on a screen nobody was
+# rendering in a test.
+
+# A menu with more entries than any terminal will hold, rendered at a given
+# height, with the screen buffer left in place to be read row by row.
+_menu_filled() {
+    local rows="${1:-24}" i
+    tui_menu_reset
+    TUI_MENU_GROUP=section; TUI_MENU_SORT=declared
+    TUI_MENU_FILTERS=(); TUI_MENU_FILTER_ON=""; TUI_MENU_FILTER=""
+    for (( i = 0; i < 30; i++ )); do
+        tui_menu_entry "e$i" "Entry number $i" ok "" check
+    done
+    tui_menu_refilter
+    TUI_ROWS="$rows"; TUI_COLS=96
+    _tui_menu_rows
+    _tui_menu_render 0 0 "$_TUI_MENU_BODY" "t" >/dev/null 2>&1
+}
+
+# The last row the render actually put a list entry on.
+_menu_last_drawn_row() {
+    local r last=0
+    for (( r = 1; r <= TUI_ROWS; r++ )); do
+        [[ "${_TUI_SCREEN_NEW[$r]-}" == *"Entry number"* ]] && last="$r"
+    done
+    printf '%s' "$last"
+}
+
+#[test]
+it_draws_the_list_down_to_the_row_the_budget_names() {
+    # The one assertion that would have caught the three rows the description
+    # gave up: it moved into the panel, the bottom went from five chrome rows to
+    # two, and the list kept the budget it had before.
+    local saved="$TUI_ROWS" savedc="$TUI_COLS"
+    _menu_filled 24
+    assert_eq "$_TUI_MENU_ROW_LAST" "21"
+    assert_eq "$(_menu_last_drawn_row)" "21"
+    # One clear row above the two the bottom keeps, and the keys on the last.
+    assert_eq "${_TUI_SCREEN_NEW[22]-}" ""
+    assert_contains "${_TUI_SCREEN_NEW[24]-}" "move"
+    TUI_ROWS="$saved"; TUI_COLS="$savedc"
+}
+
+#[test]
+it_draws_every_row_of_the_window_it_was_given() {
+    # A window wider than the rows that get drawn means a cursor on one of the
+    # rows past the bottom is built and then clipped, so moving onto it makes
+    # the selection disappear and the list does not scroll to bring it back.
+    local saved="$TUI_ROWS" savedc="$TUI_COLS"
+    _menu_filled 24
+    local drawn=0 r
+    for (( r = 1; r <= TUI_ROWS; r++ )); do
+        [[ "${_TUI_SCREEN_NEW[$r]-}" == *"Entry number"* ]] && drawn=$(( drawn + 1 ))
+    done
+    assert_eq "$drawn" "$_TUI_MENU_BODY"
+    TUI_ROWS="$saved"; TUI_COLS="$savedc"
+}
+
+#[test]
+it_scrolls_by_the_budget_rather_than_by_a_second_copy_of_it() {
+    # The run loop decides how far the list scrolls and the render decides how
+    # far it draws, in two files, and the disagreement is invisible from either
+    # side. So the loop is required to take the number rather than spell it: a
+    # second `TUI_ROWS` arithmetic in `menu.sh` is the defect itself, whatever
+    # it happens to evaluate to today.
+    local root="${BASH_SOURCE[0]%/*}/.."
+    assert_ok    grep -q 'height=\$_TUI_MENU_BODY' "$root/libs/tui/menu.sh"
+    assert_fails grep -qE 'height=\$\(\(.*TUI_ROWS' "$root/libs/tui/menu.sh"
+}
+
+#[test]
+it_still_shows_a_list_on_a_terminal_of_eight_rows() {
+    # Both sides drew nothing at all here, because the last row the placement
+    # loop allowed came out above the first row it started at.
+    local saved="$TUI_ROWS" savedc="$TUI_COLS"
+    _menu_filled 8
+    assert_eq "$_TUI_MENU_BODY" "3"
+    assert_contains "${_TUI_SCREEN_NEW[3]-}" "Entry number 0"
+    assert_eq "$(_menu_last_drawn_row)" "5"
+    TUI_ROWS="$saved"; TUI_COLS="$savedc"
+}
+
+#[test]
+it_gives_the_panel_half_the_rows_the_list_has() {
+    # The cap was spelled against the old budget, so the fixed half of the panel
+    # would have kept its old size while the column under it grew.
+    local saved="$TUI_ROWS"
+    TUI_ROWS=24; _tui_menu_rows
+    assert_eq "$(( _TUI_MENU_BODY / 2 ))" "9"
+    TUI_ROWS=40; _tui_menu_rows
+    assert_eq "$(( _TUI_MENU_BODY / 2 ))" "17"
+    TUI_ROWS="$saved"
+}
+
 #[test]
 it_keeps_the_groups_in_the_same_order_whatever_the_sort() {
     # Sorting orders rows inside a group. Sections that rearrange when the
@@ -1757,3 +1856,226 @@ ctrl_c_with_nothing_typed_leaves_the_menu() {
     fixture
     assert_fails tui_menu_run "t" < <(printf '/\003') > /dev/null 2>&1
 }
+
+# --- going backwards ----------------------------------------------------------
+
+#[test]
+the_grouping_cycles_backwards() {
+    # Three states, so forwards twice arrives at the same place. It still
+    # matters: every press rebuilds the view and puts the cursor at the top, so
+    # going the long way round is not free.
+    TUI_MENU_GROUP="section"
+    tui_menu_group_prev; assert_eq "$TUI_MENU_GROUP" "none"
+    tui_menu_group_prev; assert_eq "$TUI_MENU_GROUP" "kind"
+    tui_menu_group_prev; assert_eq "$TUI_MENU_GROUP" "section"
+}
+
+#[test]
+the_ordering_cycles_backwards() {
+    TUI_MENU_SORT="declared"
+    tui_menu_sort_prev; assert_eq "$TUI_MENU_SORT" "state"
+    tui_menu_sort_prev; assert_eq "$TUI_MENU_SORT" "name"
+    tui_menu_sort_prev; assert_eq "$TUI_MENU_SORT" "declared"
+}
+
+#[test]
+backwards_is_the_inverse_of_forwards() {
+    # The property, rather than the two tables above agreeing with each other
+    # by having been typed out twice.
+    local g s
+    for g in section kind none; do
+        TUI_MENU_GROUP="$g"; tui_menu_group_next; tui_menu_group_prev
+        assert_eq "$TUI_MENU_GROUP" "$g"
+    done
+    for s in declared name state; do
+        TUI_MENU_SORT="$s"; tui_menu_sort_next; tui_menu_sort_prev
+        assert_eq "$TUI_MENU_SORT" "$s"
+    done
+}
+
+#[test]
+the_filter_cycles_backwards_through_none() {
+    fixture
+    tui_menu_filter a _pred_true
+    tui_menu_filter b _pred_true
+    tui_menu_filter c _pred_true
+    TUI_MENU_FILTER_ON=""
+    assert_eq "$(_tui_menu_filter_prev)" "c"
+    TUI_MENU_FILTER_ON="c"; assert_eq "$(_tui_menu_filter_prev)" "b"
+    TUI_MENU_FILTER_ON="b"; assert_eq "$(_tui_menu_filter_prev)" "a"
+    TUI_MENU_FILTER_ON="a"; assert_empty "$(_tui_menu_filter_prev)"
+}
+
+#[test]
+the_filter_backwards_is_the_inverse_of_forwards() {
+    fixture
+    tui_menu_filter a _pred_true
+    tui_menu_filter b _pred_true
+    local f
+    for f in "" a b; do
+        TUI_MENU_FILTER_ON="$f"
+        TUI_MENU_FILTER_ON="$(_tui_menu_filter_next)"
+        assert_eq "$(_tui_menu_filter_prev)" "$f"
+    done
+}
+
+#[test]
+the_backwards_keys_are_registered_and_shifted() {
+    # Capitals, so they are the shifted spelling of the key that goes forwards,
+    # which is the thing somebody guesses without being told.
+    tui_menu_bindings
+    assert_eq "$(tui_action_for main 'G')" "menu-group-back"
+    assert_eq "$(tui_action_for main 'S')" "menu-sort-back"
+    assert_eq "$(tui_action_for main 'F')" "menu-filter-back"
+    assert_eq "$(tui_action_for main 'g')" "menu-group"
+    assert_eq "$(tui_action_for main 's')" "menu-sort"
+    assert_eq "$(tui_action_for main 'f')" "menu-filter"
+}
+
+#[test]
+shift_g_actually_walks_the_grouping_the_other_way() {
+    # Through the loop rather than the function, so the dispatch is what is
+    # being tested. Forwards from section is kind; backwards is none.
+    fixture
+    TUI_MENU_GROUP="section"
+    tui_menu_run "t" < <(printf 'Gq') > /dev/null 2>&1
+    assert_eq "$TUI_MENU_GROUP" "none"
+    TUI_MENU_GROUP="section"
+    tui_menu_run "t" < <(printf 'gq') > /dev/null 2>&1
+    assert_eq "$TUI_MENU_GROUP" "kind"
+}
+
+# --- wrapping -----------------------------------------------------------------
+
+#[test]
+it_breaks_text_on_words() {
+    local -a out=()
+    _tui_menu_wrap out "one two three four" 9
+    assert_eq "${out[0]}" "one two"
+    assert_eq "${out[1]}" "three"
+    assert_eq "${out[2]}" "four"
+}
+
+#[test]
+it_cuts_a_word_longer_than_the_column() {
+    # A path or a hash. Shown cut is worth more than not shown, and refusing to
+    # break it would push it off the panel entirely.
+    local -a out=()
+    _tui_menu_wrap out "/a/very/long/path/indeed" 8
+    assert_eq "${out[0]}" "/a/very/"
+    assert_ok test "${#out[@]}" -ge 3
+}
+
+#[test]
+it_wraps_nothing_into_nothing() {
+    local -a out=(stale)
+    _tui_menu_wrap out "" 20
+    assert_eq "${#out[@]}" "0"
+}
+
+#[test]
+a_column_of_no_width_wraps_nothing_rather_than_looping() {
+    # The guard that matters: a zero width with a word longer than it is an
+    # infinite loop, and the panel is zero-width on a narrow terminal.
+    local -a out=(stale)
+    _tui_menu_wrap out "something" 0
+    assert_eq "${#out[@]}" "0"
+}
+
+# --- the panel ----------------------------------------------------------------
+
+#[test]
+the_facts_are_capped_at_the_height_given() {
+    tui_menu_reset
+    local i
+    for i in 1 2 3 4 5 6 7 8; do tui_menu_aside "k$i" "v$i"; done
+    _tui_menu_aside_lines 20 3
+    assert_eq "${#_TUI_MENU_ASIDE_LINES[@]}" "3"
+}
+
+#[test]
+no_cap_leaves_every_fact_on() {
+    # The control: the cap is opt-in, so a caller that does not ask for one
+    # keeps what it had.
+    tui_menu_reset
+    local i
+    for i in 1 2 3 4 5; do tui_menu_aside "k$i" "v$i"; done
+    _tui_menu_aside_lines 20
+    assert_eq "${#_TUI_MENU_ASIDE_LINES[@]}" "5"
+}
+
+#[test]
+a_cap_larger_than_the_facts_truncates_nothing() {
+    tui_menu_reset
+    tui_menu_aside "one" "1"
+    tui_menu_aside "two" "2"
+    _tui_menu_aside_lines 20 9
+    assert_eq "${#_TUI_MENU_ASIDE_LINES[@]}" "2"
+}
+
+#[test]
+every_panel_line_is_exactly_the_width_asked_for() {
+    # They are joined onto the list rows, so a short one lets the row beside it
+    # show through and a long one pushes the screen sideways.
+    tui_menu_reset
+    tui_menu_aside "a label" "v"
+    tui_menu_aside "heading"
+    _tui_menu_aside_lines 24
+    local l plain
+    for l in ${_TUI_MENU_ASIDE_LINES[@]+"${_TUI_MENU_ASIDE_LINES[@]}"}; do
+        plain="$(printf '%s' "$l" | sed $'s/\033\\[[0-9;]*m//g')"
+        assert_eq "${#plain}" "24"
+    done
+}
+
+# --- the wrap, and what it must not do to the text ---------------------------
+
+#[test]
+wrapping_splits_a_description_on_whitespace() {
+    # The positive control for the two below. If this one ever fails, they are
+    # passing because nothing is being split at all rather than because the
+    # splitting is right.
+    local -a out
+    _tui_menu_wrap out "one two three" 40
+    assert_eq "${#out[@]}" "1"
+    assert_eq "${out[0]}" "one two three"
+}
+
+#[test]
+a_description_holding_a_star_survives_the_wrap() {
+    # It is split on whitespace and it is not a glob. Unquoted in a `for`, a
+    # description saying "size *" is replaced by whatever the working directory
+    # holds, so what the panel shows depends on where the program was started.
+    #
+    # Under `mktemp -d` rather than in the repository: a fixture at the root is
+    # untracked while it exists and stays there for good if the test aborts
+    # before its `rm`.
+    local d; d="$(mktemp -d "${TMPDIR:-/tmp}/tws-wrap.XXXXXX")"
+    : >"$d/alpha"; : >"$d/beta"
+    local before="$PWD"
+    cd "$d" || return 1
+    local -a out
+    _tui_menu_wrap out "size *" 40
+    cd "$before" || return 1
+    rm -rf "$d"
+    assert_eq "${out[0]}" "size *"
+}
+
+#[test]
+a_description_holding_a_question_mark_survives_the_wrap() {
+    # The other glob character, and the one that reaches a real description
+    # first: a panel row asking a question ends in one.
+    local d; d="$(mktemp -d "${TMPDIR:-/tmp}/tws-wrap.XXXXXX")"
+    : >"$d/ab"; : >"$d/cd"
+    local before="$PWD"
+    cd "$d" || return 1
+    local -a out
+    _tui_menu_wrap out "reboot ??" 40
+    cd "$before" || return 1
+    rm -rf "$d"
+    assert_eq "${out[0]}" "reboot ??"
+}
+
+# Always true, for the cycling tests above, which are about the order the
+# filters are visited in rather than about what any of them selects.
+_pred_true() { return 0; }

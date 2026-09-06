@@ -42,6 +42,12 @@ tui_menu_bindings() {
     tui_action_add menu-filter   main "filter: a question about the row, not a word in it" "f"
     tui_action_add menu-group    main "group by section, by kind, or not at all"           "g"
     tui_action_add menu-sort     main "sort by the order declared, by name, or by state"   "s"
+    # The same three backwards. Three or four states each, so forwards gets
+    # there eventually and takes the list with it every press: each one rebuilds
+    # the view and puts the cursor back at the top.
+    tui_action_add menu-filter-back main "the filter before this one" "F"
+    tui_action_add menu-group-back  main "the grouping before this one" "G"
+    tui_action_add menu-sort-back   main "the ordering before this one" "S"
     tui_action_add menu-palette  main "everything, by name"  "p colon"
     tui_action_add menu-help     main "this"    "question"
     tui_action_add menu-choose   main "choose"  "enter space"
