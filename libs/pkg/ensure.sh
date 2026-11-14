@@ -231,6 +231,23 @@ pkg_plan() {
 }
 
 #[pub]
+# Is the file's sha256 this one. Through `verify::digest` where it is loaded,
+# which needs bash, and through whichever of sha256sum and shasum `deps` finds
+# where it is not, so the POSIX stage before bash checks a download too. No way
+# to hash is a refusal, never a pass.
+# Usage: pkg_sha256_is <file> <sha256>
+pkg_sha256_is() {
+    local got=""
+    if command -v verify_digest >/dev/null 2>&1; then
+        verify_digest "$1" "$2"; return $(( $? != 0 ))
+    fi
+    if deps_has sha256sum; then got="$(sha256sum < "$1")"
+    elif deps_has shasum; then got="$(shasum -a 256 < "$1")"
+    else return 1; fi
+    [ "${got%% *}" = "$2" ]
+}
+
+#[pub]
 # The source rung's usual shape: fetch a release tarball, check its digest, build
 # with configure and make into a prefix in the home directory. Needs a C compiler
 # and make, which no rung can bootstrap from nothing, and says so when absent.
@@ -246,11 +263,9 @@ pkg_build_tarball() {
     elif deps_has wget; then wget -q -O "$work/src.tar.gz" "$url"
     else printf 'no curl or wget to fetch %s\n' "$url"; rm -rf "$work"; return 1; fi || {
         printf 'could not fetch %s\n' "$url"; rm -rf "$work"; return 1; }
-    if command -v verify_digest >/dev/null 2>&1; then
-        verify_digest "$work/src.tar.gz" "$sum" || {
-            printf 'the digest of %s did not match or could not be checked\n' "$url"
-            rm -rf "$work"; return 1; }
-    fi
+    pkg_sha256_is "$work/src.tar.gz" "$sum" || {
+        printf 'the digest of %s did not match, or could not be checked here\n' "$url"
+        rm -rf "$work"; return 1; }
     tar -xzf "$work/src.tar.gz" -C "$work" || { rm -rf "$work"; return 1; }
     src="$(ls -d "$work"/*/ | head -n 1)"
     ( cd "$src" && ./configure --prefix="$prefix" "$@" && make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)" && make install )

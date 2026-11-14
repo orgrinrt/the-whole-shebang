@@ -116,3 +116,12 @@ it_reads_a_read_only_usr_as_read_only_too() {
     pkg_manager_usable apk; assert_eq "$?" "0"
     _p_end
 }
+
+#[test]
+it_checks_a_download_by_its_sha256_and_refuses_a_wrong_one() {
+    _p_setup
+    printf 'hello\n' > "$T/f"
+    pkg_sha256_is "$T/f" "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"; assert_eq "$?" "0"
+    pkg_sha256_is "$T/f" "0000000000000000000000000000000000000000000000000000000000000000"; assert_eq "$?" "1"
+    _p_end
+}
