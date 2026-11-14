@@ -6,7 +6,15 @@
 
 diagnostics::findings    libs/diagnostics/findings.sh
 verify::digest           libs/verify/digest.sh
+host::fingerprint        libs/host/fingerprint.sh
+host::cooldown           libs/host/cooldown.sh
+pkg::ensure              libs/pkg/ensure.sh
+# A process group of its own and `wait` interrupted by a trap: `set -m` and
+# `[[ ]]`, neither of which a POSIX shell promises.
+#[shell(bash4)]
+proc::timeout            libs/proc/timeout.sh
 tui::action              libs/tui/action.sh
+tui::board               libs/tui/board.sh
 tui::confirm             libs/tui/confirm.sh
 tui::frame               libs/tui/frame.sh
 # Reads one keypress at a time from a terminal, with a timeout short enough to
