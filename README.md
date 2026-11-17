@@ -2,7 +2,7 @@
 
 > Bash libraries built on nutshell, each one taken on its own.
 
-These sit on top of [nutshell](https://github.com/orgrinrt/nutshell) and are meant to be picked apart, where nutshell itself is installed whole. A script that wants findings and a verdict takes `diagnostics::findings` and nothing else, and a library in here that reaches for another one without a good reason is a bug. Four are in the tree, `diagnostics::findings`, `tui`, `unpack` and `verify::digest`.
+These sit on top of [nutshell](https://github.com/orgrinrt/nutshell) and are meant to be picked apart, where nutshell itself is installed whole. A script that wants findings and a verdict takes `diagnostics::findings` and nothing else, and a library in here that reaches for another one without a good reason is a bug. Seven are in the tree: `diagnostics::findings`, `host`, `pkg::ensure`, `proc::timeout`, `tui`, `unpack` and `verify::digest`.
 
 ## Installation
 
@@ -30,9 +30,11 @@ Modules separate with `::` all the way down, and `lib.nut` says which name maps 
 
 `diagnostics::findings` records severity-tagged findings with `finding_block`, `finding_judge` and `finding_note`, and renders a verdict whose exit code a caller can branch on, 0 for nothing found, 1 for something blocking and 3 for something that needs a human to look.
 
-`tui` is fifteen modules for a terminal interface, written for a bootable maintenance tool and each usable alone. `term` enters and leaves a full-screen session and restores the terminal on every exit path, and does less rather than emit escape sequences when nothing is attached. `key` names keypresses so arrows, vi keys and the emacs pairs fold to the same names, `action` holds what an interface can do as data, with a label and the keys that reach it, and `screen` writes only the rows that changed, which matters on a bare console. Then there are `palette` for finding an action by typing, `menu`, `modal`, `confirm`, `table`, `progress`, `report`, `layout`, `frame`, `plan` and `run`.
+`tui` is sixteen modules for a terminal interface, written for a bootable maintenance tool and each usable alone. `term` enters and leaves a full-screen session and restores the terminal on every exit path, and does less rather than emit escape sequences when nothing is attached. `key` names keypresses so arrows, vi keys and the emacs pairs fold to the same names, `action` holds what an interface can do as data, with a label and the keys that reach it, and `screen` writes only the rows that changed, which matters on a bare console. Then there are `palette` for finding an action by typing, `menu`, `modal`, `confirm`, `table`, `progress`, `report`, `layout`, `frame`, `plan`, `run`, and `board`, which shows where a long run of steps is at a glance.
 
 `unpack` takes a named file out of an archive through libarchive, which is `bsdtar` on Linux and `/usr/bin/tar` on macOS, and `verify::digest` decides whether a downloaded file is the file it should be.
+
+`host::fingerprint` says what the machine is, so a result can carry it, and `host::cooldown` waits for the machine to cool before the next thing runs. `pkg::ensure` makes a binary be there however the machine allows it, and `proc::timeout` runs one command under a time limit and stops it cleanly when the limit passes.
 
 ## Status
 
