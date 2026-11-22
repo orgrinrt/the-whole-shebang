@@ -10,7 +10,7 @@
 # So most of what is below is about the refusals rather than about extracting,
 # and every positive case has a negative beside it.
 
-use test
+use test deps
 
 # **Each variant is sourced by its own test, not through `use`.** The point of
 # the module is that `lib.nut` picks between two implementations by what the
@@ -46,7 +46,7 @@ it_takes_the_named_file_out_of_a_zip_through_libarchive() {
     # prefers libarchive. Skipped only where nothing here can build a zip to
     # test against, and the suffix test below covers the machine either way.
     _up_setup
-    command -v zip >/dev/null 2>&1 || { _up_end; return 0; }
+    deps_has zip || { _up_end; return 0; }
     ( cd "$UPROOT/src" && zip -qr "$UPROOT/a.zip" . )
     assert_ok unpack_reads "$UPROOT/a.zip"
     assert_ok unpack_extract "$UPROOT/a.zip" "$UPROOT/out" thing
@@ -131,7 +131,7 @@ it_takes_the_named_file_out_of_a_zip_through_the_split_pair() {
     # prefers libarchive. Skipped only where nothing here can build a zip to
     # test against, and the suffix test below covers the machine either way.
     _up_setup
-    command -v zip >/dev/null 2>&1 || { _up_end; return 0; }
+    deps_has zip || { _up_end; return 0; }
     ( cd "$UPROOT/src" && zip -qr "$UPROOT/a.zip" . )
     assert_ok unpack_reads "$UPROOT/a.zip"
     assert_ok unpack_extract "$UPROOT/a.zip" "$UPROOT/out" thing

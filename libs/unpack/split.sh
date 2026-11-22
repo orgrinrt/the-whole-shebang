@@ -16,7 +16,7 @@
 # reported as installed, mode 0755, and said `Exec format error` the first time
 # anybody ran it. Nothing in the run said otherwise.
 
-use log
+use log deps
 
 #[pub]
 # Whether either tool here can read that file.
@@ -24,7 +24,7 @@ use log
 unpack_reads() {
     local file="${1:-}"
     [ -r "$file" ] || return 1
-    if command -v unzip >/dev/null 2>&1 && unzip -tqq -- "$file" >/dev/null 2>&1; then return 0; fi
+    if deps_has unzip && unzip -tqq -- "$file" >/dev/null 2>&1; then return 0; fi
     tar -tf "$file" >/dev/null 2>&1
 }
 
@@ -37,7 +37,7 @@ unpack_extract() {
         log_error "unpack_extract: wants an archive, a destination and a name"; return 2; }
     mkdir -p "${dir}/x" || return 1
 
-    if command -v unzip >/dev/null 2>&1 && unzip -tqq -- "$file" >/dev/null 2>&1; then
+    if deps_has unzip && unzip -tqq -- "$file" >/dev/null 2>&1; then
         unzip -qo -- "$file" -d "${dir}/x" >/dev/null 2>&1 || {
             log_error "unpack: ${file##*/} did not extract"; return 1; }
     elif tar -tf "$file" >/dev/null 2>&1; then
