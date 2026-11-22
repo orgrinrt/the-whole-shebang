@@ -2,7 +2,7 @@
 
 > Bash libraries built on nutshell, each one taken on its own.
 
-These sit on top of [nutshell](https://github.com/orgrinrt/nutshell) and are meant to be picked apart, where nutshell itself is installed whole. A script that wants findings and a verdict takes `diagnostics::findings` and nothing else, and a library in here that reaches for another one without a good reason is a bug. Eight are in the tree: `diagnostics::findings`, `host`, `pkg::ensure`, `pkg::recipes`, `proc::timeout`, `tui`, `unpack` and `verify::digest`.
+These sit on top of [nutshell](https://github.com/orgrinrt/nutshell) and are meant to be picked apart, where nutshell itself is installed whole. A script that wants findings and a verdict takes `diagnostics::findings` and nothing else, and a library in here that reaches for another one without a good reason is a bug. Nine are in the tree: `diagnostics::findings`, `host`, `pkg::ensure`, `pkg::recipes`, `pkg::release`, `proc::timeout`, `tui`, `unpack` and `verify::digest`.
 
 ## Installation
 
@@ -34,7 +34,7 @@ Modules separate with `::` all the way down, and `lib.nut` says which name maps 
 
 `unpack` takes a named file out of an archive through libarchive, which is `bsdtar` on Linux and `/usr/bin/tar` on macOS, and `verify::digest` decides whether a downloaded file is the file it should be.
 
-`host::fingerprint` says what the machine is, so a result can carry it, and `host::cooldown` waits for the machine to cool before the next thing runs. `pkg::ensure` makes a binary be there however the machine allows it, from the package manager, a release the project publishes on its forge (fetched, checked against a pinned sha256 and probed before it is placed), or a build from source, with `pkg::recipes` holding the recipes worth sharing, yq among them. `proc::timeout` runs one command under a time limit and stops it cleanly when the limit passes.
+`host::fingerprint` says what the machine is, so a result can carry it, and `host::cooldown` waits for the machine to cool before the next thing runs. `pkg::ensure` makes a binary be there however the machine allows it, from the package manager, a release the project publishes on its forge (fetched, checked against a pinned sha256 and probed before it is placed), or a build from source, the release one being the bash-only `pkg::release`, with `pkg::recipes` holding the recipes worth sharing, yq among them. `proc::timeout` runs one command under a time limit and stops it cleanly when the limit passes.
 
 ## Status
 
