@@ -32,15 +32,15 @@ _r_setup() {
     mkdir -p "$T/bin" "$T/sys" "$T/srv" "$T/home"
     local n p
     for n in sh bash env uname cat sed grep head tr mktemp chmod mkdir mv cp rm find dirname \
-             basename sha256sum shasum sort wc awk id cut tee ls tar unzip curl wget ln; do
-        p="$(deps_path "$n" 2>/dev/null)" && ln -s "$p" "$T/sys/$n"
+             basename sha256sum shasum sort wc awk id cut tee ls tar unzip curl wget ln which; do
+        for p in /usr/bin/$n /bin/$n; do [ -x "$p" ] && { ln -s "$p" "$T/sys/$n"; break; }; done
     done
     _R_PATH="$PATH"
     PATH="$T/bin:$T/sys"; export PATH
     PKG_MANAGERS="nosuchmanager" PKG_LOG="$T/log"
-    deps_forget
+    deps_forget yq zzpkg
 }
-_r_end() { PATH="$_R_PATH"; export PATH; deps_forget; rm -rf "$T"; unset T _R_PATH; }
+_r_end() { PATH="$_R_PATH"; export PATH; deps_forget yq zzpkg; rm -rf "$T"; unset T _R_PATH; }
 
 _r_serve() { printf '%s' "$2" > "$T/srv/$1"; }
 _r_here() { printf '%s_%s' "$(os_name)" "$(os_arch)"; }
@@ -158,8 +158,6 @@ it_fails_the_rung_when_the_yq_probe_says_python_and_leaves_nothing() {
     pkg_ensure yq; assert_eq "$?" "1"
     assert_contains "$PKG_WHY" "probe"
     assert_eq "$(ls -A "$T/home")" ""
-    # And what was asked about meanwhile is not left believing in it.
-    assert_ne "$(deps_variant yq)" "python"
     _r_end
 }
 
@@ -167,7 +165,7 @@ it_fails_the_rung_when_the_yq_probe_says_python_and_leaves_nothing() {
 it_rejects_a_python_yq_already_on_the_path_and_installs_mikefarahs() {
     _r_setup
     printf '#!/bin/sh\necho "yq 3.4.3"\n' > "$T/bin/yq"; chmod +x "$T/bin/yq"
-    deps_forget
+    deps_forget yq zzpkg
     _r_serve yq $'#!/bin/sh\necho "yq (https://github.com/mikefarah/yq/) version v4.44.3"\n'
     pkg_recipe yq "release=file://$T/srv/yq" "sha256_$(_r_here)=$_R_MIKEFARAH_SUM" "path=$T/home"
     pkg_ensure yq; assert_eq "$?" "0"

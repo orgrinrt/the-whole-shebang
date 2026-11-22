@@ -7,23 +7,28 @@
 #
 # nutshell's `deps` answers whether a tool is here and where. This is the other
 # half: when it is not, get it, by the best way this machine has, and say which
-# way that was. Three rungs, tried in order, each one only where it can work:
+# way that was. Four rungs, tried in order, each one only where it can work:
 #
 #   system  the machine's package manager, where there is one and it can be used:
 #           root or a way to become root, and a root filesystem that is writable.
 #           SteamOS has pacman and a read-only root, so this rung is skipped there.
-#   user    an install into the home directory that the recipe names (rustup-init,
-#           a static release binary), which needs no root at all.
+#   release a static binary the project publishes on its forge: fetched, checked
+#           against a sha256 the recipe pins per os and arch, unpacked where it is an
+#           archive, probed, and only then placed. See release.sh. Bash only.
+#   user    an install into the home directory that the recipe names (rustup-init),
+#           which needs no root at all.
 #   source  a build from source, the fallback that works wherever a C compiler is.
 #
 # A recipe is data the caller gives, one per binary: the package name for each
-# manager, and the functions for the user and source rungs and for the probe that
-# says whether a found binary is good enough (bash 3.2 is found and is not).
+# manager, the release url and digests, the functions for the user and source
+# rungs, and the probe that says whether a found binary is good enough (bash 3.2
+# is found and is not, and neither is the python yq).
 #
-# POSIX on purpose. The first thing a tool on a bare machine has to get is a bash
-# new enough for nutshell, and that has to happen before there is one. Sourced
-# from a POSIX shell with nutshell's `deps`, `os` and `priv` loaded, it works the
-# same as under `use shebang::pkg::ensure`.
+# POSIX on purpose, bar the release rung. The first thing a tool on a bare machine
+# has to get is a bash new enough for nutshell, and that has to happen before there
+# is one. Sourced from a POSIX shell with nutshell's `deps`, `os` and `priv` loaded,
+# it works the same as under `use shebang::pkg::ensure`, and the release rung says
+# it needs bash where it is not one.
 #
 # Usage:
 #   use shebang::pkg::ensure
@@ -43,6 +48,14 @@ if ! command -v use >/dev/null 2>&1; then
 fi
 
 use deps os priv key log
+
+# The release rung is bash's: `http` and `verify::digest` are. Under a POSIX shell the
+# rung is absent and says so, and the other three work as before.
+_PKG_HAS_VERIFY=""
+if [ -n "${BASH_VERSION:-}" ]; then
+    eval '_PKG_DIR="${BASH_SOURCE[0]%/*}"'
+    . "${_PKG_DIR}/release.sh"
+fi
 
 # What a run found, for the caller to read. `PKG_HOW` is `present`, `system:<manager>`,
 # `user` or `source`; `PKG_WHY` carries each rung's reason when none worked.
@@ -80,6 +93,9 @@ _pkg_mgr_install() {
         *)      return 2 ;;
     esac
 }
+
+# One more reason, the way each rung says why it did not work.
+_pkg_why() { PKG_WHY="${PKG_WHY}${PKG_WHY:+; }$1"; }
 
 # Recipe fields, stored under a key nutshell's `nut_key` makes safe for a name.
 _pkg_get() { nut_key "$1" || return 1; eval "_pg=\"\${_PKG_R_${_nk}_$2:-}\""; }
@@ -145,19 +161,14 @@ pkg_manager_usable() {
     return 0
 }
 
-# Ask again in a fresh shell, because `deps_has` remembers a miss for the life of
-# the process and an install is exactly what changes the answer.
-# FIXME(the nutshell ticket bench-run files): `deps_forget` in nutshell replaces this.
-_pkg_reask() {
-    sh -c 'NUTSHELL_ROOT="$1"
-           use() { for m in "$@"; do . "$NUTSHELL_ROOT/lib/$m.sh" || return 1; done; }
-           use deps && deps_path "$2"' _ "$NUTSHELL_ROOT" "$1" 2>/dev/null
-}
+# Ask again, because `deps_has` remembers a miss for the life of the process and an
+# install is exactly what changes the answer. Sets `_pg` to the path.
+_pkg_reask() { deps_forget "$1"; deps_has "$1" || return 1; _pg="$(deps_path "$1")"; }
 
 # Found, and good enough by the recipe's probe. Sets PKG_PATH.
 _pkg_good() {
     local b="$1" fresh="${2:-0}" p=""
-    if [ "$fresh" = 1 ]; then p="$(_pkg_reask "$b")" || return 1
+    if [ "$fresh" = 1 ]; then _pkg_reask "$b" || return 1; p="$_pg"
     else deps_has "$b" || return 1; p="$(deps_path "$b")"; fi
     _pkg_get "$b" probe
     if [ -n "$_pg" ] && ! "$_pg" "$p" >/dev/null 2>&1; then
@@ -197,6 +208,12 @@ pkg_ensure() {
         PKG_WHY="${PKG_WHY}${PKG_WHY:+; }no package manager"
     fi
 
+    _pkg_get "$b" release
+    if [ -z "$_pg" ]; then :
+    elif [ -z "$_PKG_HAS_VERIFY" ]; then _pkg_why "the release rung needs bash"
+    elif _pkg_release "$b"; then PKG_HOW="release"; return 0
+    fi
+
     for rung in user source; do
         _pkg_get "$b" "$rung"
         [ -n "$_pg" ] || { PKG_WHY="${PKG_WHY}${PKG_WHY:+; }no ${rung} recipe"; continue; }
@@ -222,6 +239,10 @@ pkg_plan() {
             printf '%s: would install with %s (%s)\n' "$b" "$m" "$pkgs"; return 0
         fi
     fi
+    _pkg_get "$b" release
+    if [ -n "$_pg" ] && [ -n "$_PKG_HAS_VERIFY" ] && [ -n "$(pkg_release_digest "$b")" ]; then
+        printf '%s: would install from the release %s\n' "$b" "$(pkg_release_url "$b")"; return 0
+    fi
     for rung in user source; do
         _pkg_get "$b" "$rung"
         [ -n "$_pg" ] && { printf '%s: would install from the %s recipe\n' "$b" "$rung"; return 0; }
@@ -238,7 +259,7 @@ pkg_plan() {
 # Usage: pkg_sha256_is <file> <sha256>
 pkg_sha256_is() {
     local got=""
-    if command -v verify_digest >/dev/null 2>&1; then
+    if [ -n "$_PKG_HAS_VERIFY" ]; then
         verify_digest "$1" "$2"; return $(( $? != 0 ))
     fi
     if deps_has sha256sum; then got="$(sha256sum < "$1")"

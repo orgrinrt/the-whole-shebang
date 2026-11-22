@@ -9,6 +9,7 @@ verify::digest           libs/verify/digest.sh
 host::fingerprint        libs/host/fingerprint.sh
 host::cooldown           libs/host/cooldown.sh
 pkg::ensure              libs/pkg/ensure.sh
+pkg::recipes             libs/pkg/recipes.sh
 # A process group of its own and `wait` interrupted by a trap: `set -m` and
 # `[[ ]]`, neither of which a POSIX shell promises.
 #[shell(bash4)]
