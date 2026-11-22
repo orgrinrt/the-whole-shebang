@@ -196,3 +196,58 @@ it_plans_a_release_install_without_fetching() {
     assert_eq "$(ls -A "$T/home")" ""
     _r_end
 }
+
+#[test]
+it_leaves_a_good_yq_in_the_destination_alone_when_a_python_yq_shadows_it() {
+    # The image case: a python yq first on PATH, ~/.local/bin after it, and
+    # mikefarah's already in ~/.local/bin. The rung cannot make the good one be
+    # the one found, so it refuses and leaves what was there, byte for byte.
+    _r_setup
+    local old=$'#!/bin/sh\necho "yq (https://github.com/mikefarah/yq/) version v4.40.0"'
+    printf '#!/bin/sh\necho "yq 3.4.3"\n' > "$T/bin/yq"; chmod +x "$T/bin/yq"
+    printf '%s\n' "$old" > "$T/home/yq"; chmod +x "$T/home/yq"
+    PATH="$T/bin:$T/home:$T/sys"; export PATH
+    deps_forget yq
+    _r_serve yq $'#!/bin/sh\necho "yq (https://github.com/mikefarah/yq/) version v4.44.3"\n'
+    pkg_recipe yq "release=file://$T/srv/yq" "sha256_$(_r_here)=$_R_MIKEFARAH_SUM" "path=$T/home"
+    pkg_ensure yq; assert_eq "$?" "1"
+    assert_contains "$PKG_WHY" "$T/bin/yq"
+    assert_contains "$PKG_WHY" "shadow"
+    assert_eq "$(cat "$T/home/yq")" "$old"
+    assert_eq "$(ls -A "$T/home")" "yq"
+    _r_end
+}
+
+#[test]
+it_replaces_a_bad_yq_in_the_destination_when_the_destination_comes_first_on_the_path() {
+    _r_setup
+    printf '#!/bin/sh\necho "yq 3.4.3"\n' > "$T/home/yq"; chmod +x "$T/home/yq"
+    PATH="$T/home:$T/bin:$T/sys"; export PATH
+    deps_forget yq
+    _r_serve yq $'#!/bin/sh\necho "yq (https://github.com/mikefarah/yq/) version v4.44.3"\n'
+    pkg_recipe yq "release=file://$T/srv/yq" "sha256_$(_r_here)=$_R_MIKEFARAH_SUM" "path=$T/home"
+    pkg_ensure yq; assert_eq "$?" "0"
+    assert_eq "$PKG_HOW" "release"
+    assert_eq "$PKG_PATH" "$T/home/yq"
+    assert_contains "$("$T/home/yq" --version)" "v4.44.3"
+    _r_end
+}
+
+#[test]
+it_keeps_the_file_that_was_there_when_a_refused_probe_follows_a_placement() {
+    # A recipe whose probe passes the stage and fails the placed file: the only
+    # way the placed file is found and refused is a probe that reads its place.
+    _r_setup
+    local old=$'#!/bin/sh\necho old'
+    printf '%s\n' "$old" > "$T/home/zzpkg"; chmod +x "$T/home/zzpkg"
+    _r_serve zzpkg $'#!/bin/sh\necho payload\n'
+    _zz_probe() { case "$1" in "$T/home/"*) return 1 ;; *) return 0 ;; esac; }
+    pkg_recipe zzpkg "release=file://$T/srv/zzpkg" "sha256_$(_r_here)=$_R_PAYLOAD_SUM" \
+        "path=$T/home" "probe=_zz_probe"
+    pkg_ensure zzpkg; assert_eq "$?" "1"
+    assert_contains "$PKG_WHY" "placed in $T/home"
+    assert_eq "$(cat "$T/home/zzpkg")" "$old"
+    assert_eq "$(ls -A "$T/home")" "zzpkg"
+    unset -f _zz_probe
+    _r_end
+}
