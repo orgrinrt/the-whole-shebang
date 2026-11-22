@@ -53,8 +53,7 @@ use deps os priv key log
 # rung is absent and says so, and the other three work as before.
 _PKG_HAS_VERIFY=""
 if [ -n "${BASH_VERSION:-}" ]; then
-    eval '_PKG_DIR="${BASH_SOURCE[0]%/*}"'
-    . "${_PKG_DIR}/release.sh"
+    use super::pkg::release
 fi
 
 # What a run found, for the caller to read. `PKG_HOW` is `present`, `system:<manager>`,

@@ -10,6 +10,11 @@ host::fingerprint        libs/host/fingerprint.sh
 host::cooldown           libs/host/cooldown.sh
 pkg::ensure              libs/pkg/ensure.sh
 pkg::recipes             libs/pkg/recipes.sh
+
+# The release rung of pkg::ensure is bash's: it uses `http` and `verify::digest`.
+# Under a POSIX shell it resolves to absent and the rung says so.
+#[shell(bash)]
+pkg::release             libs/pkg/release.sh
 # A process group of its own and `wait` interrupted by a trap: `set -m` and
 # `[[ ]]`, neither of which a POSIX shell promises.
 #[shell(bash4)]

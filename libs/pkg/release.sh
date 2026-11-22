@@ -29,11 +29,11 @@
 #   path=<dir>              where it goes, `$HOME/.local/bin` when absent
 # =============================================================================
 
-use http os
+use http os super::verify::digest
 
 # `verify_digest` is the three-answer check this rung needs; nothing but a
 # match counts here. `pkg_sha256_is` reads this to know it is loaded.
-. "${_PKG_DIR}/../verify/digest.sh" && _PKG_HAS_VERIFY=1
+_PKG_HAS_VERIFY=1
 
 #[pub]
 # The digest the recipe carries for a platform, or nothing.
@@ -57,15 +57,6 @@ pkg_release_url() {
     printf '%s' "${t//'{arch}'/$a}"
 }
 
-# Which unpack variant this machine has, as the gate in `lib.nut` picks it:
-# libarchive where something answers to it, the unzip and tar pair otherwise.
-_pkg_unpack_load() {
-    [ "$(type -t unpack_extract)" = "function" ] && return 0
-    . "${_PKG_DIR}/../unpack/libarchive.sh"
-    _unpack_libarchive_bin >/dev/null && return 0
-    . "${_PKG_DIR}/../unpack/split.sh"
-}
-
 # Fetch, check and unpack into <work>, which the caller removes. Sets _PR_FILE
 # to the file that is the binary.
 _pkg_release_fetch() {
@@ -78,7 +69,7 @@ _pkg_release_fetch() {
     _pkg_get "$b" member; member="$_pg"
     _PR_FILE="$asset"
     [ -n "$member" ] || return 0
-    _pkg_unpack_load
+    use super::unpack || { _pkg_why "release: nothing here reads archives, no bsdtar or unzip"; return 1; }
     unpack_extract "$asset" "$work/out" "$member" >/dev/null 2>&1 || {
         _pkg_why "release: no ${member} could be taken out of ${url##*/}"; return 1; }
     _PR_FILE="$work/out/$member"
