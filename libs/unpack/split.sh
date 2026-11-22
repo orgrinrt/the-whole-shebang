@@ -24,8 +24,8 @@ use log deps
 unpack_reads() {
     local file="${1:-}"
     [ -r "$file" ] || return 1
-    if deps_has unzip && unzip -tqq -- "$file" >/dev/null 2>&1; then return 0; fi
-    tar -tf "$file" >/dev/null 2>&1
+    if deps_has unzip && deps_run unzip -tqq -- "$file" >/dev/null 2>&1; then return 0; fi
+    deps_has tar && deps_run tar -tf "$file" >/dev/null 2>&1
 }
 
 #[pub]
@@ -37,11 +37,11 @@ unpack_extract() {
         log_error "unpack_extract: wants an archive, a destination and a name"; return 2; }
     mkdir -p "${dir}/x" || return 1
 
-    if deps_has unzip && unzip -tqq -- "$file" >/dev/null 2>&1; then
-        unzip -qo -- "$file" -d "${dir}/x" >/dev/null 2>&1 || {
+    if deps_has unzip && deps_run unzip -tqq -- "$file" >/dev/null 2>&1; then
+        deps_run unzip -qo -- "$file" -d "${dir}/x" >/dev/null 2>&1 || {
             log_error "unpack: ${file##*/} did not extract"; return 1; }
-    elif tar -tf "$file" >/dev/null 2>&1; then
-        tar -xf "$file" -C "${dir}/x" 2>/dev/null || {
+    elif deps_has tar && deps_run tar -tf "$file" >/dev/null 2>&1; then
+        deps_run tar -xf "$file" -C "${dir}/x" 2>/dev/null || {
             log_error "unpack: ${file##*/} did not extract"; return 1; }
     else
         log_error "unpack: nothing here reads ${file##*/}"

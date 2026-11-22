@@ -60,7 +60,7 @@ host_temp_c() {
 # Usage: host_speed_limit -> 100
 host_speed_limit() {
     deps_has pmset || return 0
-    pmset -g therm 2>/dev/null | sed -n 's/.*CPU_Speed_Limit[^0-9]*\([0-9]*\).*/\1/p' | head -n 1
+    deps_run pmset -g therm 2>/dev/null | sed -n 's/.*CPU_Speed_Limit[^0-9]*\([0-9]*\).*/\1/p' | head -n 1
 }
 
 #[pub]

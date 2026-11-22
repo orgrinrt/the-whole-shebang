@@ -287,7 +287,7 @@ pkg_build_tarball() {
     pkg_sha256_is "$work/src.tar.gz" "$sum" || {
         printf 'the digest of %s did not match, or could not be checked here\n' "$url"
         rm -rf "$work"; return 1; }
-    tar -xzf "$work/src.tar.gz" -C "$work" || { rm -rf "$work"; return 1; }
+    deps_run tar -xzf "$work/src.tar.gz" -C "$work" || { rm -rf "$work"; return 1; }
     src="$(ls -d "$work"/*/ | head -n 1)"
     ( cd "$src" && ./configure --prefix="$prefix" "$@" && make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)" && make install )
     rc=$?; rm -rf "$work"; return "$rc"
