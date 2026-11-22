@@ -174,18 +174,40 @@ it_rejects_a_python_yq_already_on_the_path_and_installs_mikefarahs() {
     _r_end
 }
 
+# The `checksums` file yq v4.44.3 publishes beside its binaries, as fetched, with
+# only the lines for the four assets the recipe names. One name, then 31 hashes
+# in the order of the release's `checksums_hashes_order`, where SHA-256 is the
+# 18th hash, so the 19th field.
+_R_YQ_CHECKSUMS="${BASH_SOURCE[0]%/*}/fixtures/yq_v4.44.3_checksums"
+
+# The SHA-256 the published file gives an asset, or nothing.
+_r_published_sha256() {
+    local -a col
+    while read -r -a col; do
+        [ "${col[0]:-}" = "$1" ] && { printf '%s' "${col[18]:-}"; return 0; }
+    done < "$_R_YQ_CHECKSUMS"
+    return 1
+}
+
 #[test]
 it_pins_the_real_yq_release_for_every_platform_it_names() {
-    # Literals from the `checksums` file published beside the release, column
-    # SHA-256 per `checksums_hashes_order`: yq v4.44.3.
     assert_eq "$(pkg_release_url yq linux x86_64)" "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64"
     assert_eq "$(pkg_release_url yq linux arm64)"  "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_arm64"
     assert_eq "$(pkg_release_url yq macos x86_64)" "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_darwin_amd64"
     assert_eq "$(pkg_release_url yq macos arm64)"  "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_darwin_arm64"
-    assert_eq "$(pkg_release_digest yq linux x86_64)" "a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7"
-    assert_eq "$(pkg_release_digest yq linux arm64)"  "0e7e1524f68d91b3ff9b089872d185940ab0fa020a5a9052046ef10547023156"
-    assert_eq "$(pkg_release_digest yq macos x86_64)" "216ddfa03e7ba0e5aba00b236ec78324b5bfc49b610db254fe92310878baea20"
-    assert_eq "$(pkg_release_digest yq macos arm64)"  "559a594ef7a6ebc5b81a67b7717fb3accedd266d8fa7d8352da7fec9e463f48b"
+    assert_eq "$(pkg_release_digest yq linux x86_64)" "$(_r_published_sha256 yq_linux_amd64)"
+    assert_eq "$(pkg_release_digest yq linux arm64)"  "$(_r_published_sha256 yq_linux_arm64)"
+    assert_eq "$(pkg_release_digest yq macos x86_64)" "$(_r_published_sha256 yq_darwin_amd64)"
+    assert_eq "$(pkg_release_digest yq macos arm64)"  "$(_r_published_sha256 yq_darwin_arm64)"
+}
+
+#[test]
+it_reads_a_sha256_from_the_published_checksums_and_nothing_for_a_missing_asset() {
+    # The reader of the fixture is itself checked against a column read by eye
+    # from the file, and against a name the file does not have.
+    assert_eq "$(_r_published_sha256 yq_linux_amd64)" "a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7"
+    assert_eq "$(_r_published_sha256 yq_plan9_mips)" ""
+    assert_eq "$(grep -c . "$_R_YQ_CHECKSUMS")" "4"
 }
 
 #[test]
