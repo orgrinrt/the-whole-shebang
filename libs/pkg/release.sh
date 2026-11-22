@@ -12,7 +12,13 @@
 # recipe carries for this os and arch, it is taken out of its archive where it
 # is one, and the recipe's probe runs on it where it was unpacked. Only then is
 # it moved into the recipe's directory. A refusal at any step leaves that
-# directory as it was.
+# directory as it was, a file already there included: it is kept aside while the
+# new one is placed and put back if `deps` then does not find the new one.
+#
+# A recipe directory that is on PATH but behind another binary of the same name
+# (an image's python yq ahead of ~/.local/bin) cannot make the placed file the one
+# found. The rung then places nothing, says in PKG_WHY which path shadows it, and
+# leaves the directory alone. A directory off PATH is put first, so it wins.
 #
 # Recipe fields this reads, beside the ones `pkg_recipe` documents:
 #   release=<url>           the asset, with `{os}` and `{arch}` for the machine
@@ -92,10 +98,50 @@ _pkg_release_probe() {
     return "$rc"
 }
 
+# The binary `deps` finds under <bin>'s name that comes before <dest> on PATH,
+# which a file placed in <dest> would not outrank. Prints its path and returns 0;
+# returns 1 where <dest> is off PATH (it is put first, so it wins) or already
+# the first place the name is found.
+# Usage: _pkg_release_shadow <bin> <dest>
+_pkg_release_shadow() {
+    local b="$1" dest="$2" cur e IFS=:
+    case ":$PATH:" in *":$dest:"*) ;; *) return 1 ;; esac
+    deps_forget "$b"
+    cur="$(deps_path "$b")" || return 1
+    [ "${cur%/*}" = "$dest" ] && return 1
+    for e in $PATH; do
+        [ "$e" = "$dest" ] && return 1
+        [ "$e" = "${cur%/*}" ] && { printf '%s' "$cur"; return 0; }
+    done
+    return 1
+}
+
+# Put the staged file in <dest>, keeping what was there in <work>/prev so that a
+# refusal after the move can put it back. Returns 1 with nothing changed where
+# the keeping or the copy fails.
+# Usage: _pkg_release_place <bin> <dest> <work>
+_pkg_release_place() {
+    local b="$1" dest="$2" work="$3"
+    mkdir -p "$dest" || return 1
+    [ ! -e "$dest/$b" ] || cp -p "$dest/$b" "$work/prev" || return 1
+    cp "$work/stage/$b" "$dest/.$b.part" && mv -f "$dest/.$b.part" "$dest/$b"
+}
+
+# Undo `_pkg_release_place`: what was there comes back, or the file goes where
+# nothing was.
+_pkg_release_unplace() {
+    local b="$1" dest="$2" work="$3"
+    if [ -e "$work/prev" ]; then
+        cp -p "$work/prev" "$dest/.$b.part" && mv -f "$dest/.$b.part" "$dest/$b"
+    else
+        rm -f "$dest/$b"
+    fi
+}
+
 # Make <bin> be there from the recipe's release. Returns 0 with PKG_PATH set.
 # Usage: _pkg_release <bin>
 _pkg_release() {
-    local b="$1" url sum dest work rc=1
+    local b="$1" url sum dest work rc=1 was="$PATH" shadow
     _pkg_get "$b" release
     [ -n "$_pg" ] || { _pkg_why "no release recipe"; return 1; }
     sum="$(pkg_release_digest "$b")"
@@ -106,12 +152,19 @@ _pkg_release() {
     mkdir -p "$work/stage"
     if _pkg_release_fetch "$b" "$url" "$sum" "$work" &&
        cp "$_PR_FILE" "$work/stage/$b" && chmod +x "$work/stage/$b" &&
-       _pkg_release_probe "$b" "$work/stage" &&
-       mkdir -p "$dest" && cp "$work/stage/$b" "$dest/.$b.part" &&
-       mv -f "$dest/.$b.part" "$dest/$b"; then
-        case ":$PATH:" in *":$dest:"*) ;; *) PATH="$dest:$PATH"; export PATH ;; esac
-        if _pkg_good "$b" 1; then rc=0
-        else rm -f "$dest/$b"; _pkg_why "release: the ${b} placed in ${dest} is not what deps finds"; fi
+       _pkg_release_probe "$b" "$work/stage"; then
+        if shadow="$(_pkg_release_shadow "$b" "$dest")"; then
+            _pkg_why "release: ${shadow} shadows ${dest}/${b} on PATH, so a ${b} placed in ${dest} would not be the one found; ${dest} is as it was"
+        elif _pkg_release_place "$b" "$dest" "$work"; then
+            case ":$PATH:" in *":$dest:"*) ;; *) PATH="$dest:$PATH"; export PATH ;; esac
+            if _pkg_good "$b" 1; then rc=0
+            else
+                _pkg_release_unplace "$b" "$dest" "$work"
+                PATH="$was"; export PATH; deps_forget "$b"
+                _pkg_why "release: the ${b} placed in ${dest} is not what deps finds, and ${dest} is as it was"
+            fi
+        else _pkg_why "release: could not place the ${b} in ${dest}"
+        fi
     fi
     rm -rf "$work" "$dest/.$b.part"
     return "$rc"
