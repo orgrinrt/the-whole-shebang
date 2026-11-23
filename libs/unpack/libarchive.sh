@@ -12,15 +12,16 @@
 # are not two things to write two paths for; the first is the second's command
 # line.
 
-use log
+use log deps
 
-# Where the extractor is, since it answers to two names.
+# The path of the extractor, since it answers to two names.
 #
-# Not a `command -v bsdtar` at each call. The gate in `lib.nut` has already
-# established that one of them exists, and this only has to say which.
+# Asked through `deps`, so the manifest and the remembered answer apply here as
+# they do to the gate in `lib.nut`, which has already established that one of the
+# two exists. This only has to say which.
 _unpack_libarchive_bin() {
-    if command -v bsdtar >/dev/null 2>&1; then printf 'bsdtar'; return 0; fi
-    if tar --version 2>&1 | head -1 | grep -qi 'bsdtar\|libarchive'; then printf 'tar'; return 0; fi
+    deps_has bsdtar && { deps_path bsdtar; return 0; }
+    deps_has tar && deps_run tar --version 2>&1 | head -1 | grep -qi 'bsdtar\|libarchive' && { deps_path tar; return 0; }
     return 1
 }
 

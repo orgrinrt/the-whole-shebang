@@ -28,6 +28,8 @@
 [ -n "${_SHEBANG_HOST_COOLDOWN_SH:-}" ] && return 0
 _SHEBANG_HOST_COOLDOWN_SH=1
 
+use deps
+
 HOST_ROOT="${HOST_ROOT:-}"
 # How the last wait ended: `temp` (under the threshold), `throttle` (no longer
 # held back), `max` (gave up at the maximum), `fixed` (nothing readable).
@@ -57,8 +59,8 @@ host_temp_c() {
 # where it is not reported.
 # Usage: host_speed_limit -> 100
 host_speed_limit() {
-    command -v pmset >/dev/null 2>&1 || return 0
-    pmset -g therm 2>/dev/null | sed -n 's/.*CPU_Speed_Limit[^0-9]*\([0-9]*\).*/\1/p' | head -n 1
+    deps_has pmset || return 0
+    deps_run pmset -g therm 2>/dev/null | sed -n 's/.*CPU_Speed_Limit[^0-9]*\([0-9]*\).*/\1/p' | head -n 1
 }
 
 #[pub]
