@@ -38,7 +38,7 @@ Modules separate with `::` all the way down, and `lib.nut` says which name maps 
 
 ## Status
 
-Second release, the api hasn't settled and breaking changes should be expected. The tui half is young and shaped by the one tool it was written for, so there are likely gaps that only show once something else uses it. `./test` runs the suite, `./test tests/tui_term_test.sh` runs one file, and `./check` runs the checks, all through the nutshell launcher.
+The api hasn't settled yet and breaking changes should be expected while it is under 1.0. The tui half is young and shaped by the one tool it was written for, so there are likely gaps that only show once something else uses it. `./test` runs the suite, `./test tests/tui_term_test.sh` runs one file, and `./check` runs the checks, all through the nutshell launcher.
 
 ## License
 
