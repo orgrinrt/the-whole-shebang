@@ -18,9 +18,9 @@ _v_setup() {
     VROOT="$(mktemp -d)"
     printf 'hello\n' > "$VROOT/f"
     mkdir -p "$VROOT/empty"
-    if command -v sha256sum >/dev/null 2>&1; then VSUM="$(sha256sum < "$VROOT/f")"
-    else VSUM="$(shasum -a 256 < "$VROOT/f")"; fi
-    VSUM="${VSUM%% *}"
+    # sha256 of `hello` and a newline, hashed by hand and written in, so the
+    # expectation is not the code under test agreeing with itself.
+    VSUM="5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
 }
 _v_end() { rm -rf "$VROOT"; unset VROOT VSUM; }
 

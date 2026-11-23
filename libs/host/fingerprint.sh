@@ -128,7 +128,8 @@ _host_libc() {
 _host_power() {
     local d t on st seen=0
     if [ "$HOST_OS" = "macos" ]; then
-        case "$(pmset -g batt 2>/dev/null | head -n 1)" in
+        deps_has pmset || { printf 'unknown'; return 0; }
+        case "$(deps_run pmset -g batt 2>/dev/null | head -n 1)" in
             *"AC Power"*) printf 'ac' ;; *"Battery Power"*) printf 'battery' ;; *) printf 'unknown' ;;
         esac
         return 0
